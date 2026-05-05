@@ -20,6 +20,19 @@ async function bootstrap() {
     .setTitle('Stock Mate API')
     .setDescription('Stock Mate API 문서')
     .setVersion('1.0')
+    .addTag('users')
+    //스웨거 페이지내 어스 설정
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        name: 'JWT',
+        description: 'JWT 토큰을 입력하세요',
+        in: 'header',
+      },
+      'accessToken', // 이 이름(보안 스키마 이름)이 데코레이터와 일치해야 합니다.
+    )
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api', app, document);

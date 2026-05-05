@@ -14,7 +14,20 @@ export class CreateUserDto {
   @IsString({ message: '비밀번호는 문자열이어야 합니다.' })
   @IsNotEmpty({ message: '비밀번호는 필수입니다.' })
   @Length(4, 20, { message: '비밀번호는 4자 이상 20자 이하로 입력해주세요.' })
+  @Matches(/^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d@$!%*#?&]{8,20}$/, {
+  message: '비밀번호는 8~20자이며, 영문과 숫자를 포함해야 합니다.',
+})
   password: string;
+
+  //닉네임
+  @ApiProperty({ example: '스톡메이트', description: '닉네임' })
+  @IsString({ message: '닉네임은 문자열이어야 합니다.' })
+  @IsNotEmpty({ message: '닉네임은 필수입니다.' })
+  @Length(2, 20, { message: '닉네임은 2자 이상 20자 이하로 입력해주세요.' })
+  @Matches(/^[a-zA-Z0-9가-힣]+$/, {
+    message: '닉네임은 한글, 영문, 숫자만 가능합니다.',
+  })
+  nickname: string;
 
   // 이름
   @ApiProperty({ example: '홍길동', description: '이름' })

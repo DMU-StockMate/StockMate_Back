@@ -2,11 +2,22 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { UsersModule } from './modules/users/users.module';
+import { RedisModule } from '@nestjs-modules/ioredis';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+    }),
+
+    //redis 모듈 추가
+    RedisModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        type: 'single',
+        url: `redis://${configService.get('REDIS_HOST')}:${configService.get('REDIS_PORT')}`,
+      }),
     }),
 
     TypeOrmModule.forRootAsync({
