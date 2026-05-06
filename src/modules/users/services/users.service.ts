@@ -32,7 +32,7 @@ export class UsersService {
     await this.checkNickName({ nickname });
 
     const hashed = await bcrypt.hash(password, 10);
-    const user = this.userRepository.create({ email, password: hashed, nickname, ...rest });
+    const user = this.userRepository.create({ email, password_hash: hashed, nickname, ...rest });
     return this.userRepository.save(user);
   }
 
@@ -46,7 +46,7 @@ export class UsersService {
     const user = await this.userRepository.findOneBy({ email: resetPasswordDto.email });
     if (!user) throw new NotFoundException('존재하지 않는 이메일입니다.');
     const hashed = await bcrypt.hash(resetPasswordDto.newPassword, 10);
-    await this.userRepository.update(user.user_id, { password: hashed });
+    await this.userRepository.update(user.user_id, { password_hash: hashed });
     return { message: '비밀번호가 성공적으로 변경되었습니다.' };
   }
   async changePassword(  user_id: number, changePasswordDto: { currentPassword: string; newPassword: string },): Promise<{ message: string }> {
@@ -54,19 +54,19 @@ export class UsersService {
 
     const user = await this.userRepository.findOne({
       where: { user_id },
-      select: ['user_id', 'password'],
+      select: ['user_id', 'password_hash'],
     });
 
     if (!user) {
       throw new NotFoundException('사용자를 찾을 수 없습니다.');
     }
 
-    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    const isMatch = await bcrypt.compare(currentPassword, user.password_hash);
     if (!isMatch) {
       throw new UnauthorizedException('현재 비밀번호가 일치하지 않습니다.');
     }
 
-    const isSame = await bcrypt.compare(newPassword, user.password);
+    const isSame = await bcrypt.compare(newPassword, user.password_hash);
     if (isSame) {
       throw new BadRequestException('새 비밀번호는 기존 비밀번호와 달라야 합니다.');
     }
@@ -74,23 +74,37 @@ export class UsersService {
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
     await this.userRepository.update(user_id, {
-      password: hashedPassword,
+      password_hash: hashedPassword,
     });
 
     return { message: '비밀번호가 성공적으로 변경되었습니다.' };
   }
-  //redis 달아야겠고 리프레시 토큰 저장 때문에
+  //redis 달았고 리프레시 토큰 저장 때문에
   async login(loginUserDto: LoginUserDto): Promise<{ accessToken: string, refreshToken: string }> {
     const { email, password } = loginUserDto;
     const user = await this.userRepository.findOne({
       where: { email },
       // selected:false 설정이라 password를 명시적으로 포함
-      select: ['user_id', 'email', 'password', 'role'],
+      select: ['user_id', 'email', 'password_hash', 'role'],
     });
 
-    if (!user || !(await bcrypt.compare(password, user.password))) {
+    if (!user || !(await bcrypt.compare(password, user.password_hash))) {
       throw new UnauthorizedException('이메일 또는 비밀번호가 올바르지 않습니다.');
     }
+
+    //user status 추가하면서 ban 기능 구현
+    if (user.status === 'BANNED') {
+      throw new UnauthorizedException('정지된 계정입니다.');
+    }
+
+    if (user.status === 'DELETED') {
+      throw new UnauthorizedException('탈퇴된 계정입니다.');
+    }
+
+    if (user.ban_until && new Date() < user.ban_until) {
+      throw new UnauthorizedException('정지 기간입니다.');
+    }
+
     const payload = { sub: user.user_id, email: user.email, role: user.role };
     const accessToken = this.jwtService.sign(payload, { expiresIn: '1h' });
     const refreshToken = this.jwtService.sign(payload, { expiresIn: '7d' });
@@ -106,10 +120,10 @@ export class UsersService {
     return { message: '로그아웃 되었습니다.' };
   };
 
-
-  async findAll(): Promise<User[]> {
-    return this.userRepository.find();
-  }
+  //이게 그냥 유저한테 필요한가?
+  // async findAll(): Promise<User[]> {
+  //   return this.userRepository.find();
+  // }
 
   async findOne(user_id: number): Promise<User> {
     const user = await this.userRepository.findOneBy({ user_id });

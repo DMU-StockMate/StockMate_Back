@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { UsersModule } from './modules/users/users.module';
 import { RedisModule } from '@nestjs-modules/ioredis';
+import { AdminModule } from './modules/users/admin.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { RedisModule } from '@nestjs-modules/ioredis';
     }),
 
     UsersModule,
+    AdminModule,
   ],
 })
 export class AppModule {}

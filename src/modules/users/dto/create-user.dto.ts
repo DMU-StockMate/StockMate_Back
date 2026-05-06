@@ -1,6 +1,7 @@
 
-import { IsEmail, IsNotEmpty, IsString, Length, Matches } from 'class-validator';
+import { IsEmail, IsEnum, IsNotEmpty, IsString, Length, Matches } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { UserRole } from 'src/modules/enums/role-enum';
 
 export class CreateUserDto {
   // 이메일
@@ -44,4 +45,15 @@ export class CreateUserDto {
     message: '전화번호 형식이 올바르지 않습니다.',
   })
   phone: string;
+
+  //최종 배포 시 삭제할 것
+  @ApiProperty({
+    description: '사용자 권한',
+    enum: UserRole,
+    example: UserRole.USER,
+  })
+  @IsEnum(UserRole, {
+    message: '유효하지 않은 권한입니다.',
+  })
+  role: UserRole;
 }

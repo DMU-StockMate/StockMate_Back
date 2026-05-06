@@ -5,7 +5,8 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-
+import { UserStatus } from 'src/modules/enums/user-status.enum'; 
+import { UserRole } from 'src/modules/enums/role-enum';
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn({ type: 'bigint', unsigned: true, name: 'user_id' })
@@ -15,36 +16,63 @@ export class User {
   email: string;
 
   @Column({ type: 'varchar', length: 255, select: false })
-  password: string;
+  password_hash: string;
 
   @Column({ type: 'varchar', length: 100 })
   name: string;
 
-  @Column({ type: 'varchar', length: 100 })
+  @Column({ type: 'varchar', length: 100, unique: true })
   nickname: string;
 
   @Column({ type: 'varchar', length: 20 })
   phone: string;
 
-  @Column({ type: 'varchar', length: 20, default: 'USER' })
-  role: string;
+  //enum 추천
+  @Column({
+    type: 'enum',
+    enum: UserRole,
+    default: UserRole.USER,
+  })
+  role: UserRole;
 
-  // 추가된 필드: 투자 레벨 (FK는 관계 설정 전까지는 일반 컬럼으로 정의 가능)
+  //계정 상태
+  @Column({
+    type: 'enum',
+    enum: UserStatus,
+    default: UserStatus.ACTIVE,
+  })
+  status: UserStatus;
+
+  //정지 기간
+  @Column({
+    type: 'datetime',
+    nullable: true,
+  })
+  ban_until: Date | null;
+
   @Column({ type: 'int', name: 'investment_level_id', nullable: true })
   investment_level_id: number;
 
-  // 추가된 필드: 프로필 이미지 URL
-  @Column({ type: 'varchar', length: 255, name: 'profile_image_url', nullable: true })
+  @Column({
+    type: 'varchar',
+    length: 255,
+    name: 'profile_image_url',
+    nullable: true,
+  })
   profile_image_url: string;
 
-  @CreateDateColumn({ name: 'created_at', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
+  @CreateDateColumn({
+    name: 'created_at',
+    type: 'timestamp',
+    default: () => 'CURRENT_TIMESTAMP',
+  })
   created_at: Date;
 
-  @UpdateDateColumn({ 
-    name: 'updated_at', 
-    type: 'timestamp', 
+  @UpdateDateColumn({
+    name: 'updated_at',
+    type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP',
-    onUpdate: 'CURRENT_TIMESTAMP' 
+    onUpdate: 'CURRENT_TIMESTAMP',
   })
   updated_at: Date;
 }

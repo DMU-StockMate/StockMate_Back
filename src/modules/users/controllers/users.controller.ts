@@ -89,36 +89,36 @@ export class UsersController {
   }
 
 
-  @UseGuards(JwtAuthGuard)
-  @Get()
-  @ApiOperation({ summary: '전체 회원 조회' })
-  @ApiResponse({ status: 200, description: '회원 목록 반환' })
-  async findAll() {
-    return await this.usersService.findAll();
-  }
+  // @UseGuards(JwtAuthGuard)
+  // @Get()
+  // @ApiOperation({ summary: '전체 회원 조회' })
+  // @ApiResponse({ status: 200, description: '회원 목록 반환' })
+  // async findAll() {
+  //   return await this.usersService.findAll();
+  // }
 
 
   //파람이 아니고 express req로 토큰 받아서 써야함
+  //수정했음 
   @UseGuards(JwtAuthGuard)
-  @Get(':userId')
-  @ApiOperation({ summary: '회원 단일 조회' })
-  @ApiParam({ name: 'userId', type: Number })
-  @ApiResponse({ status: 200, description: '회원 정보 반환' })
-  @ApiNotFoundResponse({ description: '존재하지 않는 회원입니다.' }) 
-  @ApiUnauthorizedResponse({ description: '인증 정보가 유효하지 않습니다.' })
-  async findOne(@Param('userId') userId: string) {
-    return await this.usersService.findOne(Number(userId));
+  @Get('me')
+  @ApiBearerAuth('accessToken')
+  @ApiOperation({ summary: '내 정보 조회' })
+  async findMe(@Request() req) {
+    return await this.usersService.findOne(req.user.userId);
   }
 
 
 
   @UseGuards(JwtAuthGuard)
-  @Patch(':userId')
-  @ApiOperation({ summary: '회원 정보 수정' })
-  @ApiParam({ name: 'userId', type: Number })
+  @ApiBearerAuth('accessToken')
+  @ApiOperation({ summary: '회원 정보 수정 (본인)' })
   @ApiBody({ type: UpdateUserDto })
   @ApiResponse({ status: 200, description: '회원 정보 수정 성공' })
-  async update(@Param('userId') userId: string, @Body() updateUserDto: UpdateUserDto) {
-    return await this.usersService.update(Number(userId), updateUserDto);
+  async update(
+    @Request() req,
+    @Body() updateUserDto: UpdateUserDto
+  ) {
+    return await this.usersService.update(req.user.userId, updateUserDto);
   }
 }
