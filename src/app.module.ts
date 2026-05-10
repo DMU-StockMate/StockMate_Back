@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { UsersModule } from './modules/users/users.module';
 import { RedisModule } from '@nestjs-modules/ioredis';
 import { AdminModule } from './modules/users/admin.module';
+import { LearningModule } from './modules/learning/learning.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { AdminModule } from './modules/users/admin.module';
 
     UsersModule,
     AdminModule,
+    LearningModule,
   ],
 })
 export class AppModule {}
