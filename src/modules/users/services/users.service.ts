@@ -1,12 +1,12 @@
-
-
-
-import { Injectable, NotFoundException, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, UnauthorizedException, InternalServerErrorException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import { Redis } from 'ioredis';
 import { Not, Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
+import { EmailVerificationService } from '../../email/service/email-verification.service';
+
+
 import * as bcrypt from 'bcryptjs';
 import { CreateUserDto } from '../dto/create-user.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
@@ -22,18 +22,28 @@ export class UsersService {
 
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+
     private readonly jwtService: JwtService,
+
+    private readonly emailService: EmailVerificationService,
   ) {}
 
   async create(createUserDto: CreateUserDto): Promise<User> {
     const { email, password, nickname, ...rest } = createUserDto;
 
+    await this.emailService.checkEmailVerified(email, 'REGISTER');
     await this.checkEmail({ email });
     await this.checkNickName({ nickname });
 
     const hashed = await bcrypt.hash(password, 10);
     const user = this.userRepository.create({ email, password_hash: hashed, nickname, ...rest });
-    return this.userRepository.save(user);
+
+    //생성 이후 이메일 인증 상태 지우는 코드
+    const savedUser = await this.userRepository.save(user);
+
+    await this.emailService.clearEmailVerified(email, 'REGISTER');
+
+    return savedUser;
   }
 
   async findEmail(findEmailDto: { phone: string; name: string }): Promise<{ email: string }> {
@@ -43,10 +53,16 @@ export class UsersService {
   }
 
   async resetPassword(resetPasswordDto: { email: string; newPassword: string }): Promise<{ message: string }> {
+    await this.emailService.checkEmailVerified(resetPasswordDto.email, 'RESET_PASSWORD');
+
     const user = await this.userRepository.findOneBy({ email: resetPasswordDto.email });
+    
     if (!user) throw new NotFoundException('존재하지 않는 이메일입니다.');
     const hashed = await bcrypt.hash(resetPasswordDto.newPassword, 10);
     await this.userRepository.update(user.user_id, { password_hash: hashed });
+
+    //비밀번호 재설정 이후 이메일 인증 상태 지우는 코드
+    await this.emailService.clearEmailVerified(resetPasswordDto.email, 'RESET_PASSWORD');
     return { message: '비밀번호가 성공적으로 변경되었습니다.' };
   }
   async changePassword(  user_id: number, changePasswordDto: { currentPassword: string; newPassword: string },): Promise<{ message: string }> {
@@ -175,5 +191,5 @@ export class UsersService {
 
   //해야할 거 
   // 이메일 발송 모듈, 엑세스 토큰 만료 시 리프레시 토큰과 대조 이후 재발급 서비스
-  // 컨트롤러에서 :userId 로 사용자 정보 받고 있는 거 토큰에서 뽑는 방식으로 바꿔야 함, 회원 탈퇴 기능 추가
+  // 회원 탈퇴 기능 추가
 }
