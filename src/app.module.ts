@@ -5,6 +5,8 @@ import { UsersModule } from './modules/users/users.module';
 import { RedisModule } from '@nestjs-modules/ioredis';
 import { AdminModule } from './modules/users/admin.module';
 import { LearningModule } from './modules/learning/learning.module';
+import { KrxModule } from './modules/krx/krx.module';
+import { StocksModule } from './modules/stocks/stocks.module';      
 
 @Module({
   imports: [
@@ -41,6 +43,8 @@ import { LearningModule } from './modules/learning/learning.module';
     UsersModule,
     AdminModule,
     LearningModule,
+    KrxModule,
+    StocksModule,
   ],
 })
 export class AppModule {}

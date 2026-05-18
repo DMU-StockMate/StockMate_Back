@@ -1,13 +1,13 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
-import { LearningController } from './controller/learning.controller';
+import { LearningController } from './controllers/learning.controller';
 import { LearningService } from './service/learning.service';
 
-import { QuizQuestion } from './entity/quiz-question.entity';
-import { QuizChoice } from './entity/quiz-choice.entity';
-import { QuizAttempt } from './entity/quiz-attempt.entity';
-import { QuizBookmark } from './entity/quiz-bookmark.entity';
+import { QuizQuestion } from './entities/quiz-question.entity';
+import { QuizChoice } from './entities/quiz-choice.entity';
+import { QuizAttempt } from './entities/quiz-attempt.entity';
+import { QuizBookmark } from './entities/quiz-bookmark.entity';
 
 @Module({
   imports: [

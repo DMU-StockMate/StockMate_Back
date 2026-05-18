@@ -8,9 +8,9 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
-import { QuizQuestion } from '../entity/quiz-question.entity';
-import { QuizAttempt } from '../entity/quiz-attempt.entity';
-import { QuizBookmark } from '../entity/quiz-bookmark.entity';
+import { QuizQuestion } from '../entities/quiz-question.entity';
+import { QuizAttempt } from '../entities/quiz-attempt.entity';
+import { QuizBookmark } from '../entities/quiz-bookmark.entity';
 import { SubmitAnswerDto } from '../dto/submit-answer.dto';
 
 @Injectable()
