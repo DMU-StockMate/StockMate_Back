@@ -1,9 +1,8 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsBoolean,
   IsDateString,
   IsEnum,
-  IsNotEmpty,
   IsOptional,
   IsString,
   Length,
@@ -11,24 +10,15 @@ import {
 import { StockMarket } from '../../enums/stock-market.enum';
 import { StockStatus } from '../../enums/stock-status.enum';
 
-export class CreateStockDto {
-  @ApiProperty({
-    example: '005930',
-    description: '종목 코드',
-  })
-  @IsString({ message: '종목 코드는 문자열이어야 합니다.' })
-  @IsNotEmpty({ message: '종목 코드는 필수입니다.' })
-  @Length(1, 20, { message: '종목 코드는 1자 이상 20자 이하로 입력해주세요.' })
-  ticker!: string;
-
-  @ApiProperty({
+export class UpdateStockDto {
+  @ApiPropertyOptional({
     example: '삼성전자',
     description: '회사명',
   })
+  @IsOptional()
   @IsString({ message: '회사명은 문자열이어야 합니다.' })
-  @IsNotEmpty({ message: '회사명은 필수입니다.' })
   @Length(1, 100, { message: '회사명은 1자 이상 100자 이하로 입력해주세요.' })
-  companyName!: string;
+  companyName?: string;
 
   @ApiPropertyOptional({
     example: StockMarket.KOSPI,

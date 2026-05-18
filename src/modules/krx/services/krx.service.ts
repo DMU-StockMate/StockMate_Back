@@ -4,7 +4,7 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
 import { KrxClient } from '../clients/krx.client';
 import { KRX_API_URLS, KRX_MARKETS } from '../constants/krx.constants';
 import { mapKrxDailyPrice, mapKrxStock } from '../mappers/krx.mapper';
@@ -68,22 +68,32 @@ export class KrxService {
       );
     }
 
-    let savedCount = 0;
+    const mappedStocks = rows
+      .map((row) => mapKrxStock(row, market))
+      .filter((mapped) => mapped.ticker && mapped.companyName);
+    const latestTickers: string[] = [
+      ...new Set<string>(mappedStocks.map((stock) => String(stock.ticker))),
+    ];
+    const existingStocks = await this.stockRepository.find({
+      where: {
+        ticker: In(latestTickers),
+      },
+      relations: {
+        detail: true,
+      },
+    });
+    const stockMap = new Map(
+      existingStocks.map((stock) => [stock.ticker, stock]),
+    );
+
+    let insertedCount = 0;
+    let updatedCount = 0;
+    let unchangedCount = 0;
     let skippedCount = 0;
+    skippedCount = rows.length - mappedStocks.length;
 
-    for (const row of rows) {
-      const mapped = mapKrxStock(row, market);
-
-      if (!mapped.ticker || !mapped.companyName) {
-        skippedCount++;
-        continue;
-      }
-
-      let stock = await this.stockRepository.findOne({
-        where: {
-          ticker: mapped.ticker,
-        },
-      });
+    for (const mapped of mappedStocks) {
+      let stock = stockMap.get(mapped.ticker);
 
       if (!stock) {
         stock = this.stockRepository.create({
@@ -95,33 +105,101 @@ export class KrxService {
           status: mapped.status as any,
           isActive: mapped.isActive,
         });
-      } else {
-        stock.companyName = mapped.companyName;
-        stock.market = mapped.market;
-        stock.sector = mapped.sector;
-        stock.currency = mapped.currency;
-        stock.status = mapped.status as any;
-        stock.isActive = mapped.isActive;
+
+        const savedStock = await this.stockRepository.save(stock);
+
+        await this.stockDetailRepository.save({
+          stockId: savedStock.stockId,
+          industryDetail: mapped.industryDetail,
+          listingDate: mapped.listingDate as any,
+          totalShares: mapped.totalShares,
+        });
+
+        insertedCount++;
+        continue;
       }
 
-      const savedStock = await this.stockRepository.save(stock);
+      let changed = false;
+      changed =
+        this.setIfChanged(stock, 'companyName', mapped.companyName) || changed;
+      changed = this.setIfChanged(stock, 'market', mapped.market) || changed;
+      changed = this.setIfChanged(stock, 'sector', mapped.sector) || changed;
+      changed =
+        this.setIfChanged(stock, 'currency', mapped.currency) || changed;
+      changed =
+        this.setIfChanged(stock, 'status', mapped.status as any) || changed;
+      changed =
+        this.setIfChanged(stock, 'isActive', mapped.isActive) || changed;
 
-      await this.stockDetailRepository.save({
-        stockId: savedStock.stockId,
-        industryDetail: mapped.industryDetail,
-        listingDate: mapped.listingDate as any,
-        totalShares: mapped.totalShares,
+      let detail = stock.detail;
+      let detailChanged = false;
+
+      if (!detail) {
+        detail = this.stockDetailRepository.create({
+          stockId: stock.stockId,
+        });
+        detailChanged = true;
+      }
+
+      detailChanged =
+        this.setIfChanged(detail, 'industryDetail', mapped.industryDetail) ||
+        detailChanged;
+      detailChanged =
+        this.setIfChanged(detail, 'listingDate', mapped.listingDate as any) ||
+        detailChanged;
+      detailChanged =
+        this.setIfChanged(detail, 'totalShares', mapped.totalShares) ||
+        detailChanged;
+
+      if (!changed && !detailChanged) {
+        unchangedCount++;
+        continue;
+      }
+
+      await this.stockRepository.manager.transaction(async (manager) => {
+        if (changed) {
+          await manager.save(Stock, stock);
+        }
+
+        if (detailChanged) {
+          await manager.save(StockDetail, detail);
+        }
       });
 
-      savedCount++;
+      updatedCount++;
     }
+
+    const delistedCount = await this.markDelistedStocks(market, latestTickers);
 
     return {
       market,
       basDd,
-      savedCount,
+      insertedCount,
+      updatedCount,
+      unchangedCount,
       skippedCount,
+      delistedCount,
     };
+  }
+
+  async markDelistedStocks(market: string, latestTickers: string[]) {
+    if (latestTickers.length === 0) {
+      return 0;
+    }
+
+    const result = await this.stockRepository.update(
+      {
+        market,
+        status: 'ACTIVE' as any,
+        ticker: Not(In(latestTickers)),
+      },
+      {
+        status: 'DELISTED' as any,
+        isActive: false,
+      },
+    );
+
+    return result.affected ?? 0;
   }
 
   async syncDailyPrices(date?: string) {
@@ -166,7 +244,9 @@ export class KrxService {
       );
     }
 
-    let savedCount = 0;
+    let insertedCount = 0;
+    let updatedCount = 0;
+    let unchangedCount = 0;
     let skippedCount = 0;
 
     for (const row of rows) {
@@ -200,33 +280,93 @@ export class KrxService {
           stockId: stock.stockId,
           tradeDate: mapped.tradeDate as any,
         });
+        price.openPrice = mapped.openPrice;
+        price.highPrice = mapped.highPrice;
+        price.lowPrice = mapped.lowPrice;
+        price.closePrice = mapped.closePrice;
+        price.volume = mapped.volume;
+
+        await this.stockPriceDailyRepository.save(price);
+        insertedCount++;
+      } else {
+        let changed = false;
+        changed =
+          this.setIfChanged(price, 'openPrice', mapped.openPrice) || changed;
+        changed =
+          this.setIfChanged(price, 'highPrice', mapped.highPrice) || changed;
+        changed =
+          this.setIfChanged(price, 'lowPrice', mapped.lowPrice) || changed;
+        changed =
+          this.setIfChanged(price, 'closePrice', mapped.closePrice) || changed;
+        changed = this.setIfChanged(price, 'volume', mapped.volume) || changed;
+
+        if (changed) {
+          await this.stockPriceDailyRepository.save(price);
+          updatedCount++;
+        } else {
+          unchangedCount++;
+        }
       }
 
-      price.openPrice = mapped.openPrice;
-      price.highPrice = mapped.highPrice;
-      price.lowPrice = mapped.lowPrice;
-      price.closePrice = mapped.closePrice;
-      price.volume = mapped.volume;
-
-      await this.stockPriceDailyRepository.save(price);
-
-      await this.stockDetailRepository.update(
-        { stockId: stock.stockId },
-        {
-          marketCap: mapped.marketCap,
-          totalShares: mapped.totalShares,
-        },
+      await this.upsertStockMarketDetail(
+        stock.stockId,
+        mapped.marketCap,
+        mapped.totalShares,
       );
-
-      savedCount++;
     }
 
     return {
       market,
       basDd,
-      savedCount,
+      insertedCount,
+      updatedCount,
+      unchangedCount,
       skippedCount,
     };
+  }
+
+  private async upsertStockMarketDetail(
+    stockId: number,
+    marketCap: string | null,
+    totalShares: string | null,
+  ) {
+    let detail = await this.stockDetailRepository.findOne({
+      where: {
+        stockId,
+      },
+    });
+
+    if (!detail) {
+      detail = this.stockDetailRepository.create({
+        stockId,
+        marketCap,
+        totalShares,
+      });
+
+      await this.stockDetailRepository.save(detail);
+      return;
+    }
+
+    let changed = false;
+    changed = this.setIfChanged(detail, 'marketCap', marketCap) || changed;
+    changed = this.setIfChanged(detail, 'totalShares', totalShares) || changed;
+
+    if (changed) {
+      await this.stockDetailRepository.save(detail);
+    }
+  }
+
+  private setIfChanged<T extends object, K extends keyof T>(
+    target: T,
+    field: K,
+    value: T[K],
+  ) {
+    if (target[field] === value) {
+      return false;
+    }
+
+    target[field] = value;
+    return true;
   }
 
   private getRows(data: any) {
