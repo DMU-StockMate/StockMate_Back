@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { StockMarket } from '../../enums/stock-market.enum';
 import { StockStatus } from '../../enums/stock-status.enum';
 
@@ -32,4 +33,25 @@ export class StockSearchQueryDto {
   @IsOptional()
   @IsEnum(StockStatus, { message: '종목 상태는 ACTIVE, DELISTED, SUSPENDED 중 하나여야 합니다.' })
   status?: StockStatus;
+
+  @ApiPropertyOptional({
+    example: 1,
+    description: '페이지 번호',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: '페이지 번호는 정수여야 합니다.' })
+  @Min(1, { message: '페이지 번호는 1 이상이어야 합니다.' })
+  page?: number;
+
+  @ApiPropertyOptional({
+    example: 20,
+    description: '페이지당 조회 개수',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: '페이지당 조회 개수는 정수여야 합니다.' })
+  @Min(1, { message: '페이지당 조회 개수는 1 이상이어야 합니다.' })
+  @Max(100, { message: '페이지당 조회 개수는 100 이하여야 합니다.' })
+  limit?: number;
 }
