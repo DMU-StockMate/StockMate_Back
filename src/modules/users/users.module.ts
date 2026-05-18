@@ -8,6 +8,7 @@ import { UsersService } from './services/users.service';
 import { User } from './entities/user.entity';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { EmailVerificationModule } from '../email/email-verification.module';
+import { FileModule } from '../file/module/file.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { EmailVerificationModule } from '../email/email-verification.module';
       signOptions: { expiresIn: '1d' },
     }),
     EmailVerificationModule,
+    FileModule,
   ],
   controllers: [UsersController],
   providers: [UsersService, JwtStrategy],

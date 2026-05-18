@@ -59,7 +59,7 @@ export class User {
     name: 'profile_image_url',
     nullable: true,
   })
-  profile_image_url: string;
+  profile_image_url: string | null;
 
   @CreateDateColumn({
     name: 'created_at',

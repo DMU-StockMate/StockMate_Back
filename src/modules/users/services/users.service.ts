@@ -5,7 +5,7 @@ import { Redis } from 'ioredis';
 import { Not, Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { EmailVerificationService } from '../../email/service/email-verification.service';
-
+import { FileService } from 'src/modules/file/service/file.service'; 
 
 import * as bcrypt from 'bcryptjs';
 import { CreateUserDto } from '../dto/create-user.dto';
@@ -14,6 +14,7 @@ import { LoginUserDto } from '../dto/login-user.dto';
 import { User } from '../entities/user.entity';
 import { CheckEmailDto } from '../dto/check-email.dto';
 import { CheckNickNameDto } from '../dto/check-nickname.dto';
+
 
 @Injectable()
 export class UsersService {
@@ -26,6 +27,7 @@ export class UsersService {
     private readonly jwtService: JwtService,
 
     private readonly emailService: EmailVerificationService,
+    private readonly fileService: FileService,
   ) {}
 
   async create(createUserDto: CreateUserDto): Promise<User> {
@@ -143,7 +145,7 @@ export class UsersService {
 
   async findOne(user_id: number): Promise<User> {
     const user = await this.userRepository.findOneBy({ user_id });
-    if (!user) throw new NotFoundException('User not found');
+    if (!user) throw new NotFoundException('사용자를 찾을 수 없습니다.');
     return user;
   }
 
@@ -189,7 +191,45 @@ export class UsersService {
     );
   }
 
-  //해야할 거 
-  // 이메일 발송 모듈, 엑세스 토큰 만료 시 리프레시 토큰과 대조 이후 재발급 서비스
-  // 회원 탈퇴 기능 추가
+  async updateProfileImage(
+  userId: number,
+  filename: string,
+): Promise<{ message: string; profileImageUrl: string }> {
+  const user = await this.findOne(userId);
+
+  const profileImageUrl =
+    await this.fileService.replaceProfileImage(
+      user.profile_image_url,
+      filename,
+    );
+
+  await this.userRepository.update(userId, {
+    profile_image_url: profileImageUrl,
+  });
+
+  return {
+    message: '프로필 이미지가 업로드되었습니다.',
+    profileImageUrl,
+  };
+}
+
+async deleteProfileImage(
+  userId: number,
+): Promise<{ message: string }> {
+  const user = await this.findOne(userId);
+
+  await this.fileService.deleteProfileImageByUrl(
+    user.profile_image_url,
+  );
+
+  await this.userRepository.update(userId, {
+    profile_image_url: null,
+  });
+
+  return {
+    message: '프로필 이미지가 삭제되었습니다.',
+  };
+}
+
+// 회원 탈퇴 기능 추가
 }

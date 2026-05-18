@@ -1,11 +1,45 @@
-
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+
 import { AppModule } from './app.module';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+
+import {
+  DocumentBuilder,
+  SwaggerModule,
+} from '@nestjs/swagger';
+
+import { NestExpressApplication } from '@nestjs/platform-express';
+
+import { join } from 'path';
+
+import { existsSync, mkdirSync } from 'fs';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app =
+    await NestFactory.create<NestExpressApplication>(
+      AppModule,
+    );
+
+  // 업로드 폴더 자동 생성
+  const uploadPath = join(
+    process.cwd(),
+    'uploads',
+    'profile',
+  );
+
+  if (!existsSync(uploadPath)) {
+    mkdirSync(uploadPath, {
+      recursive: true,
+    });
+  }
+
+  // 정적 파일 제공
+  app.useStaticAssets(
+    join(process.cwd(), 'uploads'),
+    {
+      prefix: '/uploads',
+    },
+  );
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -21,7 +55,6 @@ async function bootstrap() {
     .setDescription('Stock Mate API 문서')
     .setVersion('1.0')
     .addTag('users')
-    //스웨거 페이지내 어스 설정
     .addBearerAuth(
       {
         type: 'http',
@@ -31,12 +64,16 @@ async function bootstrap() {
         description: 'JWT 토큰을 입력하세요',
         in: 'header',
       },
-      'accessToken', // 이 이름(보안 스키마 이름)이 데코레이터와 일치해야 합니다.
+      'accessToken',
     )
     .build();
-  const document = SwaggerModule.createDocument(app, config);
+
+  const document =
+    SwaggerModule.createDocument(app, config);
+
   SwaggerModule.setup('api', app, document);
 
   await app.listen(3000);
 }
+
 bootstrap();
