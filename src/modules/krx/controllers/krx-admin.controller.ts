@@ -22,6 +22,6 @@ export class KrxAdminController {
   @Post('prices/sync')
   @ApiOperation({ summary: 'KRX 일별 시세 수집' })
   syncDailyPrices(@Query() query: SyncDailyPriceQueryDto) {
-    return this.krxService.syncDailyPrices(query.date);
+    return this.krxService.syncDailyPrices(query);
   }
 }

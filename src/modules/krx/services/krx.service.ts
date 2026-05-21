@@ -202,15 +202,41 @@ export class KrxService {
     return result.affected ?? 0;
   }
 
-  async syncDailyPrices(date?: string) {
+  async syncDailyPrices(query: {
+    date?: string;
+    startDate?: string;
+    endDate?: string;
+  } = {}) {
+    const { date, startDate, endDate } = query;
+
+    if (startDate || endDate) {
+      if (!startDate || !endDate) {
+        throw new BadRequestException(
+          '기간 수집은 startDate와 endDate가 모두 필요합니다.',
+        );
+      }
+
+      if (startDate > endDate) {
+        throw new BadRequestException(
+          '시작일은 종료일보다 늦을 수 없습니다.',
+        );
+      }
+
+      return this.syncDailyPricesByDateRange(startDate, endDate);
+    }
+
     const targetDate =
       date ??
       (await this.findLatestAvailableDate(
         KRX_API_URLS.KOSPI_DAILY_PRICES,
         'KRX 일별 시세 거래일',
       ));
-    const basDd = targetDate.replaceAll('-', '');
 
+    return this.syncDailyPricesByDate(targetDate);
+  }
+
+  private async syncDailyPricesByDate(targetDate: string) {
+    const basDd = targetDate.replaceAll('-', '');
     const kospiResult = await this.syncDailyPricesByMarket(
       KRX_API_URLS.KOSPI_DAILY_PRICES,
       basDd,
@@ -231,6 +257,75 @@ export class KrxService {
     };
   }
 
+  private async syncDailyPricesByDateRange(
+    startDate: string,
+    endDate: string,
+  ) {
+    const dates = this.getDateRange(startDate, endDate);
+    const maxDays = 370;
+
+    if (dates.length > maxDays) {
+      throw new BadRequestException(
+        `한 번에 수집할 수 있는 기간은 최대 ${maxDays}일입니다.`,
+      );
+    }
+
+    const results: Array<{
+      date: string;
+      status: 'synced' | 'skipped' | 'failed';
+      result?: Awaited<ReturnType<KrxService['syncDailyPricesByDate']>>;
+      message?: string;
+    }> = [];
+
+    for (const targetDate of dates) {
+      try {
+        const result = await this.syncDailyPricesByDate(targetDate);
+        results.push({
+          date: targetDate,
+          status: 'synced',
+          result,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'KRX 일별 시세 수집 중 오류가 발생했습니다.';
+
+        if (
+          error instanceof BadRequestException &&
+          message.includes('일별 시세가 없습니다')
+        ) {
+          results.push({
+            date: targetDate,
+            status: 'skipped',
+            message,
+          });
+          continue;
+        }
+
+        results.push({
+          date: targetDate,
+          status: 'failed',
+          message,
+        });
+      }
+    }
+
+    return {
+      message: 'KRX 일별 시세 기간 수집이 완료되었습니다.',
+      startDate,
+      endDate,
+      totalDays: results.length,
+      syncedDays: results.filter((result) => result.status === 'synced')
+        .length,
+      skippedDays: results.filter((result) => result.status === 'skipped')
+        .length,
+      failedDays: results.filter((result) => result.status === 'failed')
+        .length,
+      results,
+    };
+  }
+
   async syncDailyPricesByMarket(url: string, basDd: string, market: string) {
     const data = await this.krxClient.get(url, {
       basDd,
@@ -244,74 +339,107 @@ export class KrxService {
       );
     }
 
+    let skippedCount = 0;
+    const mappedRows = rows
+      .map((row) => mapKrxDailyPrice(row))
+      .filter((mapped) => {
+        if (!mapped.ticker || !mapped.tradeDate) {
+          skippedCount++;
+          return false;
+        }
+
+        return true;
+      });
+
+    const stocks = await this.stockRepository.find({
+      where: {
+        ticker: In(mappedRows.map((row) => row.ticker)),
+      },
+      select: {
+        stockId: true,
+        ticker: true,
+      },
+    });
+    const stockByTicker = new Map(stocks.map((stock) => [stock.ticker, stock]));
+    const stockIds = stocks.map((stock) => stock.stockId);
+    const tradeDate = mappedRows[0]?.tradeDate as any;
+    const existingPrices =
+      stockIds.length > 0
+        ? await this.stockPriceDailyRepository.find({
+            where: {
+              stockId: In(stockIds),
+              tradeDate,
+            },
+          })
+        : [];
+    const existingPriceByStockId = new Map(
+      existingPrices.map((price) => [price.stockId, price]),
+    );
+
     let insertedCount = 0;
     let updatedCount = 0;
     let unchangedCount = 0;
-    let skippedCount = 0;
+    const pricesToUpsert: Array<Partial<StockPriceDaily>> = [];
+    const detailsToUpsert = new Map<number, Partial<StockDetail>>();
 
-    for (const row of rows) {
-      const mapped = mapKrxDailyPrice(row);
-
-      if (!mapped.ticker || !mapped.tradeDate) {
-        skippedCount++;
-        continue;
-      }
-
-      const stock = await this.stockRepository.findOne({
-        where: {
-          ticker: mapped.ticker,
-        },
-      });
+    for (const mapped of mappedRows) {
+      const stock = stockByTicker.get(mapped.ticker);
 
       if (!stock) {
         skippedCount++;
         continue;
       }
 
-      let price = await this.stockPriceDailyRepository.findOne({
-        where: {
+      const existingPrice = existingPriceByStockId.get(stock.stockId);
+      const priceToUpsert = {
           stockId: stock.stockId,
           tradeDate: mapped.tradeDate as any,
-        },
-      });
+        openPrice: mapped.openPrice,
+        highPrice: mapped.highPrice,
+        lowPrice: mapped.lowPrice,
+        closePrice: mapped.closePrice,
+        volume: mapped.volume,
+      };
 
-      if (!price) {
-        price = this.stockPriceDailyRepository.create({
-          stockId: stock.stockId,
-          tradeDate: mapped.tradeDate as any,
-        });
-        price.openPrice = mapped.openPrice;
-        price.highPrice = mapped.highPrice;
-        price.lowPrice = mapped.lowPrice;
-        price.closePrice = mapped.closePrice;
-        price.volume = mapped.volume;
-
-        await this.stockPriceDailyRepository.save(price);
+      if (!existingPrice) {
+        pricesToUpsert.push(priceToUpsert);
         insertedCount++;
       } else {
-        let changed = false;
-        changed =
-          this.setIfChanged(price, 'openPrice', mapped.openPrice) || changed;
-        changed =
-          this.setIfChanged(price, 'highPrice', mapped.highPrice) || changed;
-        changed =
-          this.setIfChanged(price, 'lowPrice', mapped.lowPrice) || changed;
-        changed =
-          this.setIfChanged(price, 'closePrice', mapped.closePrice) || changed;
-        changed = this.setIfChanged(price, 'volume', mapped.volume) || changed;
+        const changed =
+          !this.isSameValue(existingPrice.openPrice, mapped.openPrice) ||
+          !this.isSameValue(existingPrice.highPrice, mapped.highPrice) ||
+          !this.isSameValue(existingPrice.lowPrice, mapped.lowPrice) ||
+          !this.isSameValue(existingPrice.closePrice, mapped.closePrice) ||
+          !this.isSameValue(existingPrice.volume, mapped.volume);
 
         if (changed) {
-          await this.stockPriceDailyRepository.save(price);
+          pricesToUpsert.push(priceToUpsert);
           updatedCount++;
         } else {
           unchangedCount++;
         }
       }
 
-      await this.upsertStockMarketDetail(
-        stock.stockId,
-        mapped.marketCap,
-        mapped.totalShares,
+      if (mapped.marketCap || mapped.totalShares) {
+        detailsToUpsert.set(stock.stockId, {
+          stockId: stock.stockId,
+          marketCap: mapped.marketCap,
+          totalShares: mapped.totalShares,
+        });
+      }
+    }
+
+    if (pricesToUpsert.length > 0) {
+      await this.stockPriceDailyRepository.upsert(pricesToUpsert, [
+        'stockId',
+        'tradeDate',
+      ]);
+    }
+
+    if (detailsToUpsert.size > 0) {
+      await this.stockDetailRepository.upsert(
+        Array.from(detailsToUpsert.values()),
+        ['stockId'],
       );
     }
 
@@ -367,6 +495,13 @@ export class KrxService {
 
     target[field] = value;
     return true;
+  }
+
+  private isSameValue(
+    currentValue: string | number | null | undefined,
+    nextValue: string | number | null | undefined,
+  ) {
+    return String(currentValue ?? '') === String(nextValue ?? '');
   }
 
   private getRows(data: any) {
@@ -428,5 +563,17 @@ export class KrxService {
       month: '2-digit',
       day: '2-digit',
     }).format(baseDate);
+  }
+
+  private getDateRange(startDate: string, endDate: string) {
+    const dates: string[] = [];
+    let currentDate = startDate;
+
+    while (currentDate <= endDate) {
+      dates.push(currentDate);
+      currentDate = this.addDays(currentDate, 1);
+    }
+
+    return dates;
   }
 }
