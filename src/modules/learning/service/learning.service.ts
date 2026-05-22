@@ -11,7 +11,9 @@ import { Repository } from 'typeorm';
 import { QuizQuestion } from '../entities/quiz-question.entity';
 import { QuizAttempt } from '../entities/quiz-attempt.entity';
 import { QuizBookmark } from '../entities/quiz-bookmark.entity';
+import { User } from '../../users/entities/user.entity';
 import { SubmitAnswerDto } from '../dto/submit-answer.dto';
+import { QuestionResponseDto } from '../dto/reponse.dto';
 
 @Injectable()
 export class LearningService {
@@ -24,6 +26,9 @@ export class LearningService {
 
     @InjectRepository(QuizBookmark)
     private readonly bookmarkRepository: Repository<QuizBookmark>,
+
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
   ) {}
 
   async findAllQuestions() {
@@ -38,7 +43,7 @@ export class LearningService {
     });
   }
 
-  async findQuestionById(questionId: number) {
+  async findQuestionById(questionId: number): Promise<QuestionResponseDto> {
     const question = await this.questionRepository.findOne({
       where: {
         question_id: questionId,
@@ -51,7 +56,14 @@ export class LearningService {
       throw new NotFoundException('문제를 찾을 수 없습니다.');
     }
 
-    return question;
+    return {
+      questionId: question.question_id,
+      questionText: question.question_text,
+      choices: question.choices.map((choice) => ({
+        id: choice.choice_id,
+        text: choice.choice_text,
+      })),
+    };
   }
 
  async submitAnswer(

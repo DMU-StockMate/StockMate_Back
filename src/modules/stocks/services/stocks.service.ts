@@ -14,6 +14,7 @@ import { StockDetail } from '../entities/stock-detail.entity';
 import { StockPriceDaily } from '../entities/stock-price-daily.entity';
 import { Stock, StockStatus } from '../entities/stock.entity';
 import { StockMarket } from '../../enums/stock-market.enum';
+import { KiwoomWebSocketService } from '../../kiwoom/services/kiwoom-websocket.service';
 
 @Injectable()
 export class StocksService {
@@ -26,6 +27,8 @@ export class StocksService {
 
     @InjectRepository(StockPriceDaily)
     private readonly stockPriceDailyRepository: Repository<StockPriceDaily>,
+
+    private readonly kiwoomWebSocketService: KiwoomWebSocketService
   ) {}
 
   async findAll(query: StockSearchQueryDto) {
@@ -658,5 +661,43 @@ export class StocksService {
     throw new NotImplementedException(
       `${ticker} ${dataName}를 저장하는 테이블이 아직 없습니다.`,
     );
+  }
+
+  subscribeRealtime(stockCodes: string[]) {
+    this.kiwoomWebSocketService.subscribeStocks(stockCodes);
+
+    return {
+      message: '실시간 시세 구독 요청이 완료되었습니다.',
+      stockCodes,
+    };
+  }
+
+  unsubscribeRealtime(stockCodes: string[]) {
+    this.kiwoomWebSocketService.unsubscribeStocks(stockCodes);
+
+    return {
+      message: '실시간 시세 구독 해제 요청이 완료되었습니다.',
+      stockCodes,
+    };
+  }
+
+  async getCurrentPrice(stockCode: string) {
+    const price =
+      await this.kiwoomWebSocketService.getCurrentPrice(stockCode);
+
+    if (!price) {
+      throw new NotFoundException(
+        '현재가 정보가 없습니다. 먼저 실시간 구독을 요청해야 합니다.',
+      );
+    }
+
+    return {
+      stockCode,
+      price,
+    };
+  }
+
+  getAllCurrentPrices() {
+    return this.kiwoomWebSocketService.getAllCurrentPrices();
   }
 }
