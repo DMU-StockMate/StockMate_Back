@@ -28,6 +28,8 @@ import {
 import { JwtAuthGuard } from 'src/modules/users/guards/jwt-auth.guard';
 import { LearningService } from '../service/learning.service';
 import { SubmitAnswerDto } from '../dto/submit-answer.dto';
+import { QuestionResponseDto } from '../dto/reponse.dto';
+import { QuestionAiChatRequestDto } from '../dto/question-ai-chat-request.dto';
 
 @ApiTags('learning')
 @ApiBearerAuth('accessToken')
@@ -99,7 +101,7 @@ export class LearningController {
   })
   findOneQuestion(
     @Param('questionId', ParseIntPipe) questionId: number,
-  ) {
+  ): Promise<QuestionResponseDto> {
     return this.learningService.findQuestionById(questionId);
   }
 
@@ -443,4 +445,52 @@ export class LearningController {
       questionId,
     );
   }
+  // @Post('questions/:questionId/chat/stream')
+  // @UseGuards(JwtAuthGuard)
+  // @ApiBearerAuth('accessToken')
+  // @ApiOperation({ summary: '문제 풀이 중 AI 질문 시작 SSE' })
+  // @ApiParam({
+  //   name: 'questionId',
+  //   type: Number,
+  //   example: 1,
+  //   description: 'AI에게 질문할 문제 ID',
+  // })
+  // @ApiBody({ type: QuestionAiChatRequestDto })
+  // @ApiResponse({
+  //   status: 201,
+  //   description: 'AI 답변을 SSE 방식으로 스트리밍합니다.',
+  // })
+  // chatAboutQuestionStream(
+  //   @Req() req,
+  //   @Param('questionId', ParseIntPipe) questionId: number,
+  //   @Body() dto: QuestionAiChatRequestDto,
+  // ) {
+  //   return this.learningService.chatAboutQuestionStream(
+  //     req.user.userId,
+  //     questionId,
+  //     dto.message,
+  //   );
+  // }
+  // @Post(':sessionId/messages/stream')
+  // @UseGuards(JwtAuthGuard)
+  // @ApiBearerAuth('accessToken')
+  // @ApiOperation({ summary: 'AI 대화 세션 메시지 추가 SSE' })
+  // @ApiParam({
+  //   name: 'sessionId',
+  //   type: Number,
+  //   example: 1,
+  //   description: 'AI 대화 세션 ID',
+  // })
+  // @ApiBody({ type: QuestionAiChatRequestDto })
+  // sendMessageStream(
+  //   @Req() req,
+  //   @Param('sessionId', ParseIntPipe) sessionId: number,
+  //   @Body() dto: QuestionAiChatRequestDto,
+  // ) {
+  //   return this.aiChatService.sendMessageStream(
+  //     req.user.userId,
+  //     sessionId,
+  //     dto.message,
+  //   );
+  // }
 }

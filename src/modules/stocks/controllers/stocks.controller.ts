@@ -1,10 +1,15 @@
 import {
+  Body,
   Controller,
   Get,
   Param,
+  Post,
   Query,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
+  ApiBody,
+  ApiInternalServerErrorResponse,
   ApiNotFoundResponse,
   ApiOperation,
   ApiParam,
@@ -14,6 +19,7 @@ import {
 import { StockPriceQueryDto } from '../dto/stock-price-query.dto';
 import { StockSearchQueryDto } from '../dto/stock-search-query.dto';
 import { StocksService } from '../services/stocks.service';
+import { SubscribeStocksDto } from '../dto/subscribe-stocks.dto';
 
 @ApiTags('stocks')
 @Controller('stocks')
@@ -74,6 +80,116 @@ export class StocksController {
   @ApiResponse({ status: 200, description: '업종 목록 조회 성공' })
   findSectors() {
     return this.stocksService.findSectors();
+  }
+  @Post('realtime/subscribe')
+  @ApiOperation({
+    summary: '실시간 시세 종목 구독',
+    description:
+      '종목 상세 화면 또는 매수/매도 화면 진입 시 해당 종목의 실시간 시세 수신을 시작합니다.',
+  })
+  @ApiBody({
+    type: SubscribeStocksDto,
+    description: '실시간 시세 구독 요청 종목코드 목록',
+  })
+  @ApiResponse({
+    status: 201,
+    description: '실시간 시세 구독 요청 성공',
+    schema: {
+      example: {
+        message: '실시간 시세 구독 요청이 완료되었습니다.',
+        stockCodes: ['005930', '000660'],
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    description: `
+- stockCodes는 배열이어야 합니다.
+- stockCodes는 최소 1개 이상이어야 합니다.
+- 각 종목코드는 문자열이어야 합니다.
+    `,
+  })
+  @ApiInternalServerErrorResponse({
+    description: `
+- 키움 WebSocket이 연결되지 않았습니다.
+- 실시간 시세 구독 요청 중 서버 오류가 발생했습니다.
+    `,
+  })
+  subscribeRealtime(
+    @Body() dto: SubscribeStocksDto,
+  ) {
+    return this.stocksService.subscribeRealtime(
+      dto.stockCodes,
+    );
+  }
+
+  @Post('realtime/unsubscribe')
+  @ApiOperation({
+    summary: '실시간 시세 종목 구독 해제',
+    description:
+      '종목 상세 화면 또는 매수/매도 화면을 벗어날 때 해당 종목의 실시간 시세 수신을 중단합니다.',
+  })
+  @ApiBody({
+    type: SubscribeStocksDto,
+    description: '실시간 시세 구독 해제 종목코드 목록',
+  })
+  @ApiResponse({
+    status: 201,
+    description: '실시간 시세 구독 해제 요청 성공',
+    schema: {
+      example: {
+        message: '실시간 시세 구독 해제 요청이 완료되었습니다.',
+        stockCodes: ['005930', '000660'],
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    description: `
+- stockCodes는 배열이어야 합니다.
+- stockCodes는 최소 1개 이상이어야 합니다.
+- 각 종목코드는 문자열이어야 합니다.
+    `,
+  })
+  @ApiInternalServerErrorResponse({
+    description: `
+- 키움 WebSocket이 연결되지 않았습니다.
+- 실시간 시세 구독 해제 요청 중 서버 오류가 발생했습니다.
+    `,
+  })
+  unsubscribeRealtime(
+    @Body() dto: SubscribeStocksDto,
+  ) {
+    return this.stocksService.unsubscribeRealtime(
+      dto.stockCodes,
+    );
+  }
+
+  @Get('realtime/prices')
+  @ApiOperation({
+    summary: '실시간 현재가 캐시 전체 조회',
+    description:
+      '현재 서버가 WebSocket으로 수신해 캐싱 중인 모든 종목의 현재가 목록을 조회합니다. 개발/확인용 API입니다.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: '실시간 현재가 캐시 조회 성공',
+    schema: {
+      example: [
+        {
+          stockCode: '005930',
+          price: 294500,
+        },
+        {
+          stockCode: '000660',
+          price: 1943000,
+        },
+      ],
+    },
+  })
+  @ApiInternalServerErrorResponse({
+    description: '서버 내부 오류',
+  })
+  getAllCurrentPrices() {
+    return this.stocksService.getAllCurrentPrices();
   }
 
   @Get('sectors/:sectorId')
@@ -261,17 +377,18 @@ export class StocksController {
   findLatestDailyPrice(@Param('ticker') ticker: string) {
     return this.stocksService.findLatestDailyPrice(ticker);
   }
-
-  @Get(':ticker')
-  @ApiOperation({ summary: '종목 상세 조회' })
+      @Get(':ticker/price')
+  @ApiOperation({ summary: '종목 실시간 가격 조회' })
   @ApiParam({
     name: 'ticker',
     example: '005930',
     description: '종목 코드',
   })
-  @ApiResponse({ status: 200, description: '종목 상세 조회 성공' })
+  @ApiResponse({ status: 200, description: '종목 실시간 가격 조회 성공' })
   @ApiNotFoundResponse({ description: '종목을 찾을 수 없습니다.' })
-  findByTicker(@Param('ticker') ticker: string) {
-    return this.stocksService.findByTicker(ticker);
+  getCurrentPrice(@Param('ticker') ticker: string) {
+    return this.stocksService.getCurrentPrice(ticker);
   }
+
+  
 }
