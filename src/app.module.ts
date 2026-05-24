@@ -7,6 +7,7 @@ import { AdminModule } from './modules/users/admin.module';
 import { LearningModule } from './modules/learning/learning.module';
 import { KrxModule } from './modules/krx/krx.module';
 import { StocksModule } from './modules/stocks/stocks.module';      
+import { AiModule } from './modules/ai/modules/ai.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { StocksModule } from './modules/stocks/stocks.module';
     LearningModule,
     KrxModule,
     StocksModule,
+    AiModule,
   ],
 })
 export class AppModule {}
