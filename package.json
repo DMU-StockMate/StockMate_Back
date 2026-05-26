@@ -45,8 +45,12 @@
     "rxjs": "^7.8.1",
     "swagger-ui-express": "^5.0.1",
     "typeorm": "^0.3.28",
+<<<<<<< HEAD
     "ws": "^8.21.0",
     "xml2js": "^0.6.2"
+=======
+    "ws": "^8.21.0"
+>>>>>>> f171976 (feat: add watchlist API and improve profile management)
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
@@ -62,7 +66,10 @@
     "@types/nodemailer": "^8.0.0",
     "@types/supertest": "^6.0.2",
     "@types/ws": "^8.18.1",
+<<<<<<< HEAD
     "@types/xml2js": "^0.4.14",
+=======
+>>>>>>> f171976 (feat: add watchlist API and improve profile management)
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-prettier": "^5.2.2",

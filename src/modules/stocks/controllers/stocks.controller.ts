@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import {
   Body,
   Controller,
@@ -9,6 +10,9 @@ import {
   Sse,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
+=======
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+>>>>>>> f171976 (feat: add watchlist API and improve profile management)
 import {
   ApiBadRequestResponse,
   ApiBody,
@@ -424,6 +428,7 @@ export class StocksController {
   getCurrentPrice(@Param('ticker') ticker: string) {
     return this.stocksService.getCurrentPrice(ticker);
   }
+<<<<<<< HEAD
 
   @Sse(':ticker/price/stream')
   @ApiOperation({ summary: '종목 실시간 가격 틱 스트림 (SSE)' })
@@ -439,4 +444,6 @@ export class StocksController {
   }
 
   
+=======
+>>>>>>> f171976 (feat: add watchlist API and improve profile management)
 }

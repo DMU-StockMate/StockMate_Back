@@ -41,6 +41,7 @@ export class StocksService {
     @InjectRepository(StockPriceDaily)
     private readonly stockPriceDailyRepository: Repository<StockPriceDaily>,
 
+<<<<<<< HEAD
     @InjectRepository(StockInvestmentIndicator)
     private readonly stockInvestmentIndicatorRepository: Repository<StockInvestmentIndicator>,
 
@@ -53,6 +54,9 @@ export class StocksService {
     private readonly kiwoomAuthService: KiwoomAuthService,
 
     private readonly configService: ConfigService,
+=======
+    private readonly kiwoomWebSocketService: KiwoomWebSocketService,
+>>>>>>> f171976 (feat: add watchlist API and improve profile management)
   ) {}
 
   async findAll(query: StockSearchQueryDto) {
@@ -117,6 +121,7 @@ export class StocksService {
   }
 
   async findCurrentPrice(ticker: string) {
+<<<<<<< HEAD
     const snapshot = await this.resolveCurrentPriceSnapshot(ticker);
 
     return {
@@ -130,11 +135,27 @@ export class StocksService {
       changePrice: snapshot.changePrice,
       changeRate: snapshot.changeRate,
       price: snapshot.latestPrice,
+=======
+    const { stock, latestPrice, previousPrice, change } =
+      await this.findLatestAndPreviousDailyPrice(ticker);
+
+    return {
+      stockId: stock.stockId,
+      ticker: stock.ticker,
+      companyName: stock.companyName,
+      tradeDate: latestPrice.tradeDate,
+      currentPrice: latestPrice.closePrice,
+      previousClosePrice: previousPrice?.closePrice ?? null,
+      changePrice: change.changePrice,
+      changeRate: change.changeRate,
+      price: latestPrice,
+>>>>>>> f171976 (feat: add watchlist API and improve profile management)
     };
   }
 
   async findSummary(ticker: string) {
     const stock = await this.findByTicker(ticker);
+<<<<<<< HEAD
     const [latestPrice, previousPrice] =
       await this.stockPriceSnapshotService.findTwoLatestPricesByStock(
         stock.stockId,
@@ -144,6 +165,12 @@ export class StocksService {
         latestPrice,
         previousPrice,
       );
+=======
+    const [latestPrice, previousPrice] = await this.findTwoLatestPricesByStock(
+      stock.stockId,
+    );
+    const change = this.calculatePriceChange(latestPrice, previousPrice);
+>>>>>>> f171976 (feat: add watchlist API and improve profile management)
 
     return {
       stock,
@@ -237,6 +264,7 @@ export class StocksService {
     }
   }
 
+<<<<<<< HEAD
   /**
    * 네이버 금융이 쓰는 와이즈리포트(WiseReport) 기업개요 페이지에서
    * "주요제품 매출구성" 표를 가져옵니다. DART Open API엔 이 데이터가 없어
@@ -370,13 +398,27 @@ export class StocksService {
     const totalShares = this.stockPriceSnapshotService.toNumberOrNull(
       stock.detail?.totalShares,
     );
+=======
+  async findIndicators(ticker: string) {
+    const stock = await this.findByTicker(ticker);
+    const [latestPrice, previousPrice] = await this.findTwoLatestPricesByStock(
+      stock.stockId,
+    );
+    const change = this.calculatePriceChange(latestPrice, previousPrice);
+    const currentPrice = this.toNumberOrNull(latestPrice?.closePrice);
+    const marketCap = this.toNumberOrNull(stock.detail?.marketCap);
+    const totalShares = this.toNumberOrNull(stock.detail?.totalShares);
+>>>>>>> f171976 (feat: add watchlist API and improve profile management)
     const marketCapFromPrice =
       currentPrice !== null && totalShares !== null
         ? currentPrice * totalShares
         : null;
+<<<<<<< HEAD
     const latestIndicator = await this.findLatestInvestmentIndicator(
       stock.stockId,
     );
+=======
+>>>>>>> f171976 (feat: add watchlist API and improve profile management)
 
     return {
       stockId: stock.stockId,
@@ -396,6 +438,7 @@ export class StocksService {
             ? Math.round(marketCapFromPrice).toString()
             : null,
       indicators: {
+<<<<<<< HEAD
         per: latestIndicator?.per ?? null,
         pbr: latestIndicator?.pbr ?? null,
         eps: latestIndicator?.eps ?? null,
@@ -406,6 +449,15 @@ export class StocksService {
       },
       indicatorTradeDate: latestIndicator?.tradeDate ?? null,
       indicatorSource: latestIndicator?.source ?? null,
+=======
+        per: null,
+        pbr: null,
+        eps: null,
+        bps: null,
+        roe: null,
+        dividendYield: null,
+      },
+>>>>>>> f171976 (feat: add watchlist API and improve profile management)
       dataAvailability: {
         marketCap:
           stock.detail?.marketCap !== null &&
@@ -413,9 +465,13 @@ export class StocksService {
         totalShares:
           stock.detail?.totalShares !== null &&
           stock.detail?.totalShares !== undefined,
+<<<<<<< HEAD
         financialIndicators: latestIndicator
           ? this.hasInvestmentIndicatorValue(latestIndicator)
           : false,
+=======
+        financialIndicators: false,
+>>>>>>> f171976 (feat: add watchlist API and improve profile management)
       },
     };
   }
@@ -510,10 +566,16 @@ export class StocksService {
 
   private async findLatestAndPreviousDailyPrice(ticker: string) {
     const stock = await this.findByTicker(ticker);
+<<<<<<< HEAD
     const [latestPrice, previousPrice] =
       await this.stockPriceSnapshotService.findTwoLatestPricesByStock(
         stock.stockId,
       );
+=======
+    const [latestPrice, previousPrice] = await this.findTwoLatestPricesByStock(
+      stock.stockId,
+    );
+>>>>>>> f171976 (feat: add watchlist API and improve profile management)
 
     if (!latestPrice) {
       throw new NotFoundException('종목 시세를 찾을 수 없습니다.');
@@ -523,6 +585,7 @@ export class StocksService {
       stock,
       latestPrice,
       previousPrice,
+<<<<<<< HEAD
       change:
         this.stockPriceSnapshotService.calculatePriceChangeFromPrices(
           latestPrice,
@@ -533,15 +596,25 @@ export class StocksService {
 
   private async findLatestInvestmentIndicator(stockId: number) {
     return this.stockInvestmentIndicatorRepository.findOne({
+=======
+      change: this.calculatePriceChange(latestPrice, previousPrice),
+    };
+  }
+
+  private async findTwoLatestPricesByStock(stockId: number) {
+    return this.stockPriceDailyRepository.find({
+>>>>>>> f171976 (feat: add watchlist API and improve profile management)
       where: {
         stockId,
       },
       order: {
         tradeDate: 'DESC',
       },
+      take: 2,
     });
   }
 
+<<<<<<< HEAD
   private hasInvestmentIndicatorValue(indicator: StockInvestmentIndicator) {
     return [
       indicator.per,
@@ -556,8 +629,46 @@ export class StocksService {
 
   async findLatestDailyPrice(ticker: string) {
     const snapshot = await this.resolveCurrentPriceSnapshot(ticker);
+=======
+  private calculatePriceChange(
+    latestPrice?: StockPriceDaily,
+    previousPrice?: StockPriceDaily,
+  ) {
+    const latestClose = this.toNumberOrNull(latestPrice?.closePrice);
+    const previousClose = this.toNumberOrNull(previousPrice?.closePrice);
+
+    if (latestClose === null || previousClose === null || previousClose === 0) {
+      return {
+        changePrice: null,
+        changeRate: null,
+      };
+    }
+>>>>>>> f171976 (feat: add watchlist API and improve profile management)
+
+    const changePrice = latestClose - previousClose;
 
     return {
+      changePrice,
+      changeRate: (changePrice / previousClose) * 100,
+    };
+  }
+
+  private toNumberOrNull(value?: string | number | null) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    const numberValue = Number(value);
+
+    return Number.isFinite(numberValue) ? numberValue : null;
+  }
+
+  async findLatestDailyPrice(ticker: string) {
+    const { stock, latestPrice, previousPrice, change } =
+      await this.findLatestAndPreviousDailyPrice(ticker);
+
+    return {
+<<<<<<< HEAD
       stockId: snapshot.stock.stockId,
       ticker: snapshot.stock.ticker,
       companyName: snapshot.stock.companyName,
@@ -590,6 +701,15 @@ export class StocksService {
       previousClosePrice: snapshot.previousClosePrice,
       changePrice: snapshot.changePrice,
       changeRate: snapshot.changeRate,
+=======
+      stockId: stock.stockId,
+      ticker: stock.ticker,
+      companyName: stock.companyName,
+      price: latestPrice,
+      previousClosePrice: previousPrice?.closePrice ?? null,
+      changePrice: change.changePrice,
+      changeRate: change.changeRate,
+>>>>>>> f171976 (feat: add watchlist API and improve profile management)
     };
   }
 
@@ -951,6 +1071,7 @@ export class StocksService {
 
   async getCurrentPrice(stockCode: string) {
     const price = await this.kiwoomWebSocketService.getCurrentPrice(stockCode);
+<<<<<<< HEAD
     const stock = await this.findByTicker(stockCode);
     const [latestPrice] =
       await this.stockPriceSnapshotService.findTwoLatestPricesByStock(
@@ -963,6 +1084,8 @@ export class StocksService {
       price,
       previousClosePrice,
     );
+=======
+>>>>>>> f171976 (feat: add watchlist API and improve profile management)
 
     if (price === null) {
       throw new NotFoundException(

@@ -1,3 +1,14 @@
+<<<<<<< HEAD
+=======
+import {
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+  InternalServerErrorException,
+  BadRequestException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+>>>>>>> f171976 (feat: add watchlist API and improve profile management)
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import {
   BadRequestException,
@@ -6,11 +17,15 @@ import {
   UnauthorizedException
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+<<<<<<< HEAD
 import { InjectRepository } from '@nestjs/typeorm';
 import { Redis } from 'ioredis';
 import { FileService } from 'src/modules/file/service/file.service';
 import { Not, Repository } from 'typeorm';
 import { EmailVerificationService } from '../../email/services/email-verification.service';
+=======
+import { EmailVerificationService } from '../../email/service/email-verification.service';
+>>>>>>> f171976 (feat: add watchlist API and improve profile management)
 
 import * as bcrypt from 'bcryptjs';
 import { UserRole } from 'src/modules/enums/role-enum';
@@ -48,7 +63,10 @@ export class UsersService {
       email,
       password_hash: hashed,
       nickname,
+<<<<<<< HEAD
       role: UserRole.USER,
+=======
+>>>>>>> f171976 (feat: add watchlist API and improve profile management)
       ...rest,
     });
 
@@ -240,6 +258,7 @@ export class UsersService {
     );
   }
 
+<<<<<<< HEAD
   async updateProfileImage(
   userId: number,
   filename: string,
@@ -281,4 +300,9 @@ async deleteProfileImage(
 }
 
 // 회원 탈퇴 기능 추가
+=======
+  //해야할 거
+  // 이메일 발송 모듈, 엑세스 토큰 만료 시 리프레시 토큰과 대조 이후 재발급 서비스
+  // 회원 탈퇴 기능 추가
+>>>>>>> f171976 (feat: add watchlist API and improve profile management)
 }

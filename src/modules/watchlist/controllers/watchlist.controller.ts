@@ -50,6 +50,7 @@ export class WatchlistController {
     return this.watchlistService.check(req.user.userId, stockCode);
   }
 
+<<<<<<< HEAD
   @Post(':watchlistId/realtime/subscribe')
   @ApiOperation({
     summary: '관심 종목 실시간 시세 구독',
@@ -100,6 +101,8 @@ export class WatchlistController {
     return this.watchlistService.getRealtimePrice(req.user.userId, watchlistId);
   }
 
+=======
+>>>>>>> f171976 (feat: add watchlist API and improve profile management)
   @Get(':watchlistId')
   @ApiOperation({ summary: '특정 관심 종목 상세 조회' })
   @ApiParam({ name: 'watchlistId', description: '관심 종목 ID' })
