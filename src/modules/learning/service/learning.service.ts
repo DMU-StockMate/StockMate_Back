@@ -11,7 +11,6 @@ import { Repository } from 'typeorm';
 import { QuizQuestion } from '../entities/quiz-question.entity';
 import { QuizAttempt } from '../entities/quiz-attempt.entity';
 import { QuizBookmark } from '../entities/quiz-bookmark.entity';
-import { User } from '../../users/entities/user.entity';
 import { SubmitAnswerDto } from '../dto/submit-answer.dto';
 import { QuestionResponseDto } from '../dto/reponse.dto';
 
@@ -27,8 +26,6 @@ export class LearningService {
     @InjectRepository(QuizBookmark)
     private readonly bookmarkRepository: Repository<QuizBookmark>,
 
-    @InjectRepository(User)
-    private readonly userRepository: Repository<User>,
   ) {}
 
   async findAllQuestions() {
@@ -43,18 +40,10 @@ export class LearningService {
     });
   }
 
-  async findQuestionById(questionId: number): Promise<QuestionResponseDto> {
-    const question = await this.questionRepository.findOne({
-      where: {
-        question_id: questionId,
-        status: 'ACTIVE',
-      },
-      relations: ['choices'],
-    });
-
-    if (!question) {
-      throw new NotFoundException('문제를 찾을 수 없습니다.');
-    }
+ async findQuestionById(
+    questionId: number,
+  ): Promise<QuestionResponseDto> {
+    const question = await this.findQuestionEntityById(questionId);
 
     return {
       questionId: question.question_id,
@@ -71,7 +60,7 @@ export class LearningService {
   questionId: number,
   dto: SubmitAnswerDto,
 ) {
-  const question = await this.findQuestionById(questionId);
+  const question = await this.findQuestionEntityById(questionId);
 
   const selectedChoice = question.choices.find(
     (choice) => choice.choice_id === dto.selectedChoiceId,
@@ -265,5 +254,22 @@ export class LearningService {
       message: '북마크가 삭제되었습니다.',
       questionId,
     };
+  }
+  private async findQuestionEntityById(
+    questionId: number,
+  ): Promise<QuizQuestion> {
+    const question = await this.questionRepository.findOne({
+      where: {
+        question_id: questionId,
+        status: 'ACTIVE',
+      },
+      relations: ['choices'],
+    });
+
+    if (!question) {
+      throw new NotFoundException('문제를 찾을 수 없습니다.');
+    }
+
+    return question;
   }
 }
