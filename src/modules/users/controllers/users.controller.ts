@@ -1,6 +1,27 @@
-import { Controller, Get, Post, Body, Param, Request, Patch, UseGuards, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Request,
+  Patch,
+  UseGuards,
+  Query,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiParam, ApiUnauthorizedResponse, ApiConflictResponse, ApiBadRequestResponse, ApiNotFoundResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBody,
+  ApiParam,
+  ApiUnauthorizedResponse,
+  ApiConflictResponse,
+  ApiBadRequestResponse,
+  ApiNotFoundResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { UsersService } from '../services/users.service';
 import { CreateUserDto } from '../dto/create-user.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
@@ -64,16 +85,23 @@ export class UsersController {
   @Patch('change-password')
   @ApiOperation({ summary: '로그인 상태에서 비밀번호 변경' })
   @ApiResponse({ status: 200, description: '비밀번호 변경 성공' })
-  async changePassword(@Request() req, @Body() changePasswordDto: ChangePasswordDto) {
-    return await this.usersService.changePassword(req.user.userId, changePasswordDto);
+  async changePassword(
+    @Request() req,
+    @Body() changePasswordDto: ChangePasswordDto,
+  ) {
+    return await this.usersService.changePassword(
+      req.user.userId,
+      changePasswordDto,
+    );
   }
-
 
   @Post('login')
   @ApiOperation({ summary: '로그인' })
   @ApiBody({ type: LoginUserDto })
   @ApiResponse({ status: 200, description: '로그인 성공, JWT 토큰 반환' })
-  @ApiUnauthorizedResponse({ description: '이메일 또는 비밀번호가 올바르지 않습니다.' })
+  @ApiUnauthorizedResponse({
+    description: '이메일 또는 비밀번호가 올바르지 않습니다.',
+  })
   async login(@Body() loginUserDto: LoginUserDto) {
     return await this.usersService.login(loginUserDto);
   }
@@ -88,7 +116,6 @@ export class UsersController {
     return await this.usersService.create(createUserDto);
   }
 
-
   // @UseGuards(JwtAuthGuard)
   // @Get()
   // @ApiOperation({ summary: '전체 회원 조회' })
@@ -97,9 +124,8 @@ export class UsersController {
   //   return await this.usersService.findAll();
   // }
 
-
   //파람이 아니고 express req로 토큰 받아서 써야함
-  //수정했음 
+  //수정했음
   @UseGuards(JwtAuthGuard)
   @Get('me')
   @ApiBearerAuth('accessToken')
@@ -108,17 +134,13 @@ export class UsersController {
     return await this.usersService.findOne(req.user.userId);
   }
 
-
-
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('accessToken')
+  @Patch('me')
   @ApiOperation({ summary: '회원 정보 수정 (본인)' })
   @ApiBody({ type: UpdateUserDto })
   @ApiResponse({ status: 200, description: '회원 정보 수정 성공' })
-  async update(
-    @Request() req,
-    @Body() updateUserDto: UpdateUserDto
-  ) {
+  async update(@Request() req, @Body() updateUserDto: UpdateUserDto) {
     return await this.usersService.update(req.user.userId, updateUserDto);
   }
 }
