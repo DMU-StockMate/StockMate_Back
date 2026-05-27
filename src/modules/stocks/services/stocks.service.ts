@@ -28,7 +28,7 @@ export class StocksService {
     @InjectRepository(StockPriceDaily)
     private readonly stockPriceDailyRepository: Repository<StockPriceDaily>,
 
-    private readonly kiwoomWebSocketService: KiwoomWebSocketService
+    private readonly kiwoomWebSocketService: KiwoomWebSocketService,
   ) {}
 
   async findAll(query: StockSearchQueryDto) {
@@ -80,8 +80,10 @@ export class StocksService {
   }
 
   async findAllStocks(query: StockSearchQueryDto) {
-    const queryBuilder = this.createStockSearchQueryBuilder(query)
-      .orderBy('stock.companyName', 'ASC');
+    const queryBuilder = this.createStockSearchQueryBuilder(query).orderBy(
+      'stock.companyName',
+      'ASC',
+    );
 
     return queryBuilder.getMany();
   }
@@ -91,28 +93,40 @@ export class StocksService {
   }
 
   async findCurrentPrice(ticker: string) {
-    const { stockId, companyName, price } = await this.findLatestDailyPrice(ticker);
+    const { stock, latestPrice, previousPrice, change } =
+      await this.findLatestAndPreviousDailyPrice(ticker);
+    const realtimePrice = await this.kiwoomWebSocketService.getCurrentPrice(
+      stock.ticker,
+    );
+    const latestClose = this.toNumberOrNull(latestPrice.closePrice);
+    const previousClose = this.toNumberOrNull(previousPrice?.closePrice);
+    const currentPrice = realtimePrice ?? latestClose;
+    const basePrice = realtimePrice !== null ? latestClose : previousClose;
+    const realtimeChange =
+      realtimePrice !== null
+        ? this.calculatePriceChangeByValue(currentPrice, basePrice)
+        : change;
 
     return {
-      stockId,
-      ticker,
-      companyName,
-      tradeDate: price.tradeDate,
-      currentPrice: price.closePrice,
-      price,
+      stockId: stock.stockId,
+      ticker: stock.ticker,
+      companyName: stock.companyName,
+      tradeDate: latestPrice.tradeDate,
+      currentPrice,
+      realtimePrice,
+      previousClosePrice: basePrice,
+      changePrice: realtimeChange.changePrice,
+      changeRate: realtimeChange.changeRate,
+      price: latestPrice,
     };
   }
 
   async findSummary(ticker: string) {
     const stock = await this.findByTicker(ticker);
-    const latestPrice = await this.stockPriceDailyRepository.findOne({
-      where: {
-        stockId: stock.stockId,
-      },
-      order: {
-        tradeDate: 'DESC',
-      },
-    });
+    const [latestPrice, previousPrice] = await this.findTwoLatestPricesByStock(
+      stock.stockId,
+    );
+    const change = this.calculatePriceChange(latestPrice, previousPrice);
 
     return {
       stock,
@@ -125,6 +139,9 @@ export class StocksService {
         description: stock.detail?.description ?? null,
         marketCap: stock.detail?.marketCap ?? null,
         currentPrice: latestPrice?.closePrice ?? null,
+        previousClosePrice: previousPrice?.closePrice ?? null,
+        changePrice: change.changePrice,
+        changeRate: change.changeRate,
         tradeDate: latestPrice?.tradeDate ?? null,
       },
     };
@@ -197,8 +214,55 @@ export class StocksService {
     return this.throwStockDataNotImplemented(ticker, '재무 정보');
   }
 
-  findIndicators(ticker: string) {
-    return this.throwStockDataNotImplemented(ticker, '투자 지표');
+  async findIndicators(ticker: string) {
+    const stock = await this.findByTicker(ticker);
+    const [latestPrice, previousPrice] = await this.findTwoLatestPricesByStock(
+      stock.stockId,
+    );
+    const change = this.calculatePriceChange(latestPrice, previousPrice);
+    const currentPrice = this.toNumberOrNull(latestPrice?.closePrice);
+    const marketCap = this.toNumberOrNull(stock.detail?.marketCap);
+    const totalShares = this.toNumberOrNull(stock.detail?.totalShares);
+    const marketCapFromPrice =
+      currentPrice !== null && totalShares !== null
+        ? currentPrice * totalShares
+        : null;
+
+    return {
+      stockId: stock.stockId,
+      ticker: stock.ticker,
+      companyName: stock.companyName,
+      tradeDate: latestPrice?.tradeDate ?? null,
+      currentPrice: latestPrice?.closePrice ?? null,
+      previousClosePrice: previousPrice?.closePrice ?? null,
+      changePrice: change.changePrice,
+      changeRate: change.changeRate,
+      marketCap: stock.detail?.marketCap ?? null,
+      totalShares: stock.detail?.totalShares ?? null,
+      estimatedMarketCap:
+        marketCap !== null
+          ? marketCap.toString()
+          : marketCapFromPrice !== null
+            ? Math.round(marketCapFromPrice).toString()
+            : null,
+      indicators: {
+        per: null,
+        pbr: null,
+        eps: null,
+        bps: null,
+        roe: null,
+        dividendYield: null,
+      },
+      dataAvailability: {
+        marketCap:
+          stock.detail?.marketCap !== null &&
+          stock.detail?.marketCap !== undefined,
+        totalShares:
+          stock.detail?.totalShares !== null &&
+          stock.detail?.totalShares !== undefined,
+        financialIndicators: false,
+      },
+    };
   }
 
   findDividends(ticker: string) {
@@ -273,12 +337,10 @@ export class StocksService {
   async findDailyPrices(ticker: string, query: StockPriceQueryDto) {
     const stock = await this.findByTicker(ticker);
 
-    if (
-      query.startDate &&
-      query.endDate &&
-      query.startDate > query.endDate
-    ) {
-      throw new BadRequestException('시작 날짜는 종료 날짜보다 늦을 수 없습니다.');
+    if (query.startDate && query.endDate && query.startDate > query.endDate) {
+      throw new BadRequestException(
+        '시작 날짜는 종료 날짜보다 늦을 수 없습니다.',
+      );
     }
 
     const prices = await this.findPricesByStock(stock.stockId, query, 'DESC');
@@ -291,27 +353,104 @@ export class StocksService {
     };
   }
 
-  async findLatestDailyPrice(ticker: string) {
+  private async findLatestAndPreviousDailyPrice(ticker: string) {
     const stock = await this.findByTicker(ticker);
+    const [latestPrice, previousPrice] = await this.findTwoLatestPricesByStock(
+      stock.stockId,
+    );
 
-    const price = await this.stockPriceDailyRepository.findOne({
+    if (!latestPrice) {
+      throw new NotFoundException('종목 시세를 찾을 수 없습니다.');
+    }
+
+    return {
+      stock,
+      latestPrice,
+      previousPrice,
+      change: this.calculatePriceChange(latestPrice, previousPrice),
+    };
+  }
+
+  private async findTwoLatestPricesByStock(stockId: number) {
+    return this.stockPriceDailyRepository.find({
       where: {
-        stockId: stock.stockId,
+        stockId,
       },
       order: {
         tradeDate: 'DESC',
       },
+      take: 2,
     });
+  }
 
-    if (!price) {
-      throw new NotFoundException('종목 시세를 찾을 수 없습니다.');
+  private calculatePriceChange(
+    latestPrice?: StockPriceDaily,
+    previousPrice?: StockPriceDaily,
+  ) {
+    const latestClose = this.toNumberOrNull(latestPrice?.closePrice);
+    const previousClose = this.toNumberOrNull(previousPrice?.closePrice);
+
+    return this.calculatePriceChangeByValue(latestClose, previousClose);
+  }
+
+  private calculatePriceChangeByValue(
+    currentPrice: number | null,
+    previousClose: number | null,
+  ) {
+    if (
+      currentPrice === null ||
+      previousClose === null ||
+      previousClose === 0
+    ) {
+      return {
+        changePrice: null,
+        changeRate: null,
+      };
     }
+
+    const changePrice = currentPrice - previousClose;
+
+    return {
+      changePrice,
+      changeRate: (changePrice / previousClose) * 100,
+    };
+  }
+
+  private toNumberOrNull(value?: string | number | null) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    const numberValue = Number(value);
+
+    return Number.isFinite(numberValue) ? numberValue : null;
+  }
+
+  async findLatestDailyPrice(ticker: string) {
+    const { stock, latestPrice, previousPrice, change } =
+      await this.findLatestAndPreviousDailyPrice(ticker);
+    const realtimePrice = await this.kiwoomWebSocketService.getCurrentPrice(
+      stock.ticker,
+    );
+    const latestClose = this.toNumberOrNull(latestPrice.closePrice);
+    const previousClose = this.toNumberOrNull(previousPrice?.closePrice);
+    const currentPrice = realtimePrice ?? latestClose;
+    const basePrice = realtimePrice !== null ? latestClose : previousClose;
+    const realtimeChange =
+      realtimePrice !== null
+        ? this.calculatePriceChangeByValue(currentPrice, basePrice)
+        : change;
 
     return {
       stockId: stock.stockId,
       ticker: stock.ticker,
       companyName: stock.companyName,
-      price,
+      currentPrice,
+      realtimePrice,
+      price: latestPrice,
+      previousClosePrice: basePrice,
+      changePrice: realtimeChange.changePrice,
+      changeRate: realtimeChange.changeRate,
     };
   }
 
@@ -460,12 +599,10 @@ export class StocksService {
     query: StockPriceQueryDto,
     order: 'ASC' | 'DESC',
   ) {
-    if (
-      query.startDate &&
-      query.endDate &&
-      query.startDate > query.endDate
-    ) {
-      throw new BadRequestException('시작 날짜는 종료 날짜보다 늦을 수 없습니다.');
+    if (query.startDate && query.endDate && query.startDate > query.endDate) {
+      throw new BadRequestException(
+        '시작 날짜는 종료 날짜보다 늦을 수 없습니다.',
+      );
     }
 
     const queryBuilder = this.stockPriceDailyRepository
@@ -577,10 +714,7 @@ export class StocksService {
     limit: number,
   ) {
     const normalizedLimit = this.normalizeLimit(limit);
-    const orderBy =
-      type === 'volume'
-        ? 'latest.volume'
-        : 'changeRate';
+    const orderBy = type === 'volume' ? 'latest.volume' : 'changeRate';
     const orderDirection = type === 'fall' ? 'ASC' : 'DESC';
 
     const queryBuilder = this.stockRepository
@@ -682,10 +816,13 @@ export class StocksService {
   }
 
   async getCurrentPrice(stockCode: string) {
-    const price =
-      await this.kiwoomWebSocketService.getCurrentPrice(stockCode);
+    const price = await this.kiwoomWebSocketService.getCurrentPrice(stockCode);
+    const stock = await this.findByTicker(stockCode);
+    const [latestPrice] = await this.findTwoLatestPricesByStock(stock.stockId);
+    const previousClosePrice = this.toNumberOrNull(latestPrice?.closePrice);
+    const change = this.calculatePriceChangeByValue(price, previousClosePrice);
 
-    if (!price) {
+    if (price === null) {
       throw new NotFoundException(
         '현재가 정보가 없습니다. 먼저 실시간 구독을 요청해야 합니다.',
       );
@@ -693,7 +830,12 @@ export class StocksService {
 
     return {
       stockCode,
+      ticker: stockCode,
       price,
+      currentPrice: price,
+      previousClosePrice,
+      changePrice: change.changePrice,
+      changeRate: change.changeRate,
     };
   }
 
