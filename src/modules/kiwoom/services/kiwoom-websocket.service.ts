@@ -82,11 +82,6 @@ export class KiwoomWebSocketService
             if (message.return_code === 0) {
                 this.logger.log('키움 WebSocket 로그인 성공');
 
-                this.subscribeStocks([
-                '005930',
-                '000660',
-                ]);
-
             } else {
                 this.logger.error(
                 `키움 WebSocket 로그인 실패: ${message.return_msg}`,
