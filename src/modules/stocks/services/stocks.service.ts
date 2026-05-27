@@ -95,16 +95,28 @@ export class StocksService {
   async findCurrentPrice(ticker: string) {
     const { stock, latestPrice, previousPrice, change } =
       await this.findLatestAndPreviousDailyPrice(ticker);
+    const realtimePrice = await this.kiwoomWebSocketService.getCurrentPrice(
+      stock.ticker,
+    );
+    const latestClose = this.toNumberOrNull(latestPrice.closePrice);
+    const previousClose = this.toNumberOrNull(previousPrice?.closePrice);
+    const currentPrice = realtimePrice ?? latestClose;
+    const basePrice = realtimePrice !== null ? latestClose : previousClose;
+    const realtimeChange =
+      realtimePrice !== null
+        ? this.calculatePriceChangeByValue(currentPrice, basePrice)
+        : change;
 
     return {
       stockId: stock.stockId,
       ticker: stock.ticker,
       companyName: stock.companyName,
       tradeDate: latestPrice.tradeDate,
-      currentPrice: latestPrice.closePrice,
-      previousClosePrice: previousPrice?.closePrice ?? null,
-      changePrice: change.changePrice,
-      changeRate: change.changeRate,
+      currentPrice,
+      realtimePrice,
+      previousClosePrice: basePrice,
+      changePrice: realtimeChange.changePrice,
+      changeRate: realtimeChange.changeRate,
       price: latestPrice,
     };
   }
@@ -378,14 +390,25 @@ export class StocksService {
     const latestClose = this.toNumberOrNull(latestPrice?.closePrice);
     const previousClose = this.toNumberOrNull(previousPrice?.closePrice);
 
-    if (latestClose === null || previousClose === null || previousClose === 0) {
+    return this.calculatePriceChangeByValue(latestClose, previousClose);
+  }
+
+  private calculatePriceChangeByValue(
+    currentPrice: number | null,
+    previousClose: number | null,
+  ) {
+    if (
+      currentPrice === null ||
+      previousClose === null ||
+      previousClose === 0
+    ) {
       return {
         changePrice: null,
         changeRate: null,
       };
     }
 
-    const changePrice = latestClose - previousClose;
+    const changePrice = currentPrice - previousClose;
 
     return {
       changePrice,
@@ -406,15 +429,28 @@ export class StocksService {
   async findLatestDailyPrice(ticker: string) {
     const { stock, latestPrice, previousPrice, change } =
       await this.findLatestAndPreviousDailyPrice(ticker);
+    const realtimePrice = await this.kiwoomWebSocketService.getCurrentPrice(
+      stock.ticker,
+    );
+    const latestClose = this.toNumberOrNull(latestPrice.closePrice);
+    const previousClose = this.toNumberOrNull(previousPrice?.closePrice);
+    const currentPrice = realtimePrice ?? latestClose;
+    const basePrice = realtimePrice !== null ? latestClose : previousClose;
+    const realtimeChange =
+      realtimePrice !== null
+        ? this.calculatePriceChangeByValue(currentPrice, basePrice)
+        : change;
 
     return {
       stockId: stock.stockId,
       ticker: stock.ticker,
       companyName: stock.companyName,
+      currentPrice,
+      realtimePrice,
       price: latestPrice,
-      previousClosePrice: previousPrice?.closePrice ?? null,
-      changePrice: change.changePrice,
-      changeRate: change.changeRate,
+      previousClosePrice: basePrice,
+      changePrice: realtimeChange.changePrice,
+      changeRate: realtimeChange.changeRate,
     };
   }
 
@@ -781,8 +817,12 @@ export class StocksService {
 
   async getCurrentPrice(stockCode: string) {
     const price = await this.kiwoomWebSocketService.getCurrentPrice(stockCode);
+    const stock = await this.findByTicker(stockCode);
+    const [latestPrice] = await this.findTwoLatestPricesByStock(stock.stockId);
+    const previousClosePrice = this.toNumberOrNull(latestPrice?.closePrice);
+    const change = this.calculatePriceChangeByValue(price, previousClosePrice);
 
-    if (!price) {
+    if (price === null) {
       throw new NotFoundException(
         '현재가 정보가 없습니다. 먼저 실시간 구독을 요청해야 합니다.',
       );
@@ -790,7 +830,12 @@ export class StocksService {
 
     return {
       stockCode,
+      ticker: stockCode,
       price,
+      currentPrice: price,
+      previousClosePrice,
+      changePrice: change.changePrice,
+      changeRate: change.changeRate,
     };
   }
 
