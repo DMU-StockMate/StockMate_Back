@@ -1,5 +1,5 @@
 import {
-    BadRequestException,
+  BadRequestException,
   Injectable,
   Logger,
   OnModuleDestroy,
@@ -13,9 +13,7 @@ import { InjectRedis } from '@nestjs-modules/ioredis';
 import Redis from 'ioredis';
 
 @Injectable()
-export class KiwoomWebSocketService
-  implements OnModuleInit, OnModuleDestroy
-{
+export class KiwoomWebSocketService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(KiwoomWebSocketService.name);
 
   private ws: WebSocket | null = null;
@@ -32,16 +30,16 @@ export class KiwoomWebSocketService
     private readonly redis: Redis,
   ) {}
 
-    async onModuleInit() {
+  async onModuleInit() {
     try {
-        await this.connect();
+      await this.connect();
     } catch (error: any) {
-        this.logger.error(
+      this.logger.error(
         '키움 WebSocket 초기 연결 실패',
         error.response?.data ?? error.message,
-        );
+      );
     }
-    }
+  }
 
   async onModuleDestroy() {
     this.isManualClosed = true;
@@ -56,14 +54,11 @@ export class KiwoomWebSocketService
   private async connect() {
     const token = await this.kiwoomAuthService.getAccessToken();
 
-    this.ws = new WebSocket(
-      'wss://api.kiwoom.com:10000/api/dostk/websocket',
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+    this.ws = new WebSocket('wss://api.kiwoom.com:10000/api/dostk/websocket', {
+      headers: {
+        Authorization: `Bearer ${token}`,
       },
-    );
+    });
 
     this.ws.on('open', () => {
       this.logger.log('키움 WebSocket 연결 성공');
@@ -71,30 +66,33 @@ export class KiwoomWebSocketService
     });
 
     this.ws.on('message', (data) => {
-        const raw = data.toString();
+      const raw = data.toString();
 
-        this.logger.debug(`키움 원본 수신: ${raw}`);
+      this.logger.debug(`키움 원본 수신: ${raw}`);
 
-        try {
-            const message = JSON.parse(raw);
+      try {
+        const message = JSON.parse(raw);
 
         if (message.trnm === 'LOGIN') {
-            if (message.return_code === 0) {
-                this.logger.log('키움 WebSocket 로그인 성공');
+          if (message.return_code === 0) {
+            this.logger.log('키움 WebSocket 로그인 성공');
 
-            } else {
-                this.logger.error(
-                `키움 WebSocket 로그인 실패: ${message.return_msg}`,
-                );
+            if (this.subscribedStocks.size > 0) {
+              this.subscribeStocks([...this.subscribedStocks]);
             }
+          } else {
+            this.logger.error(
+              `키움 WebSocket 로그인 실패: ${message.return_msg}`,
+            );
+          }
 
-        return;
+          return;
         }
 
         void this.handleMessage(message);
-    } catch (error) {
+      } catch (error) {
         this.logger.warn(`JSON 파싱 실패: ${raw}`);
-    }
+      }
     });
 
     this.ws.on('error', (error) => {
@@ -117,7 +115,7 @@ export class KiwoomWebSocketService
 
   subscribeStocks(stockCodes: string[]) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-    throw new BadRequestException('WebSocket이 아직 연결되지 않았습니다.');
+      throw new BadRequestException('WebSocket이 아직 연결되지 않았습니다.');
     }
 
     stockCodes.forEach((stockCode) => {
@@ -142,65 +140,67 @@ export class KiwoomWebSocketService
     this.ws.send(JSON.stringify(payload));
   }
 
+  isSubscribedStock(stockCode: string) {
+    return this.subscribedStocks.has(stockCode);
+  }
+
   private async sendLogin() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        return;
+      return;
     }
 
     const token = await this.kiwoomAuthService.getAccessToken();
 
     const payload = {
-        trnm: 'LOGIN',
-        token,
+      trnm: 'LOGIN',
+      token,
     };
 
     this.logger.log('키움 WebSocket 로그인 요청');
     this.logger.debug(JSON.stringify(payload));
 
     this.ws.send(JSON.stringify(payload));
-    }
+  }
 
   unsubscribeStocks(stockCodes: string[]) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        throw new BadRequestException('WebSocket이 아직 연결되지 않았습니다.');
+      throw new BadRequestException('WebSocket이 아직 연결되지 않았습니다.');
     }
 
     const notSubscribed = stockCodes.filter(
-        (stockCode) => !this.subscribedStocks.has(stockCode),
+      (stockCode) => !this.subscribedStocks.has(stockCode),
     );
 
     if (notSubscribed.length > 0) {
-        throw new BadRequestException(
+      throw new BadRequestException(
         `구독 중인 종목이 아닙니다: ${notSubscribed.join(', ')}`,
-        );
+      );
     }
 
     stockCodes.forEach((stockCode) => {
-        this.subscribedStocks.delete(stockCode);
-        this.currentPrices.delete(stockCode);
+      this.subscribedStocks.delete(stockCode);
+      this.currentPrices.delete(stockCode);
     });
 
     const payload = {
-        trnm: 'REMOVE',
-        grp_no: '1',
-        data: [
+      trnm: 'REMOVE',
+      grp_no: '1',
+      data: [
         {
-            item: stockCodes,
-            type: ['0B'],
+          item: stockCodes,
+          type: ['0B'],
         },
-        ],
+      ],
     };
 
     this.logger.log(`실시간 종목 구독 해제: ${stockCodes.join(', ')}`);
     this.ws.send(JSON.stringify(payload));
-    }
+  }
 
   private async handleMessage(message: any) {
-   
     this.logger.log('키움 실시간 메시지 수신');
     //console.log(JSON.stringify(message, null, 2));
 
-    
     const data = message?.data;
 
     if (!Array.isArray(data)) {
@@ -208,10 +208,7 @@ export class KiwoomWebSocketService
     }
 
     for (const item of data) {
-      const stockCode =
-        item?.item ??
-        item?.stockCode ??
-        item?.code;
+      const stockCode = item?.item ?? item?.stockCode ?? item?.code;
 
       const priceValue =
         item?.values?.['10'] ??
@@ -223,25 +220,21 @@ export class KiwoomWebSocketService
         continue;
       }
 
-      const price = Number(
-        String(priceValue).replace(/[^0-9.-]/g, ''),
-      );
+      const price = Number(String(priceValue).replace(/[^0-9.-]/g, ''));
 
       if (Number.isNaN(price)) {
         continue;
       }
 
-        this.currentPrices.set(stockCode, Math.abs(price));
+      this.currentPrices.set(stockCode, Math.abs(price));
 
-        await this.redis.set(
+      await this.redis.set(
         `stock:price:${stockCode}`,
         String(Math.abs(price)),
         'EX',
         60,
-        );
-      this.logger.log(
-        `현재가 갱신: ${stockCode} = ${Math.abs(price)}`,
       );
+      this.logger.log(`현재가 갱신: ${stockCode} = ${Math.abs(price)}`);
     }
   }
 
@@ -249,17 +242,17 @@ export class KiwoomWebSocketService
     const memoryPrice = this.currentPrices.get(stockCode);
 
     if (memoryPrice) {
-        return memoryPrice;
+      return memoryPrice;
     }
 
     const redisPrice = await this.redis.get(`stock:price:${stockCode}`);
 
     if (!redisPrice) {
-        return null;
+      return null;
     }
 
     return Number(redisPrice);
-    }
+  }
 
   getAllCurrentPrices() {
     return Array.from(this.currentPrices.entries()).map(
