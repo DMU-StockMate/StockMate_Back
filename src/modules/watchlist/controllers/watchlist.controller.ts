@@ -50,6 +50,56 @@ export class WatchlistController {
     return this.watchlistService.check(req.user.userId, stockCode);
   }
 
+  @Post(':watchlistId/realtime/subscribe')
+  @ApiOperation({
+    summary: '관심 종목 실시간 시세 구독',
+    description:
+      '관심 종목 목록에서 사용자가 선택한 관심 종목 1개만 키움 실시간 시세 구독 대상으로 등록합니다.',
+  })
+  @ApiParam({ name: 'watchlistId', description: '관심 종목 ID' })
+  @ApiResponse({
+    status: 201,
+    description: '관심 종목 실시간 시세 구독 요청 성공',
+  })
+  subscribeRealtime(@Request() req, @Param('watchlistId') watchlistId: string) {
+    return this.watchlistService.subscribeRealtime(
+      req.user.userId,
+      watchlistId,
+    );
+  }
+
+  @Post(':watchlistId/realtime/unsubscribe')
+  @ApiOperation({
+    summary: '관심 종목 실시간 시세 구독 해제',
+    description:
+      '관심 종목 상세 화면을 벗어날 때 선택한 관심 종목 1개의 키움 실시간 시세 구독을 해제합니다.',
+  })
+  @ApiParam({ name: 'watchlistId', description: '관심 종목 ID' })
+  @ApiResponse({
+    status: 201,
+    description: '관심 종목 실시간 시세 구독 해제 요청 성공',
+  })
+  unsubscribeRealtime(
+    @Request() req,
+    @Param('watchlistId') watchlistId: string,
+  ) {
+    return this.watchlistService.unsubscribeRealtime(
+      req.user.userId,
+      watchlistId,
+    );
+  }
+
+  @Get(':watchlistId/realtime/price')
+  @ApiOperation({ summary: '관심 종목 실시간 현재가 조회' })
+  @ApiParam({ name: 'watchlistId', description: '관심 종목 ID' })
+  @ApiResponse({
+    status: 200,
+    description: '관심 종목 실시간 현재가 조회 성공',
+  })
+  getRealtimePrice(@Request() req, @Param('watchlistId') watchlistId: string) {
+    return this.watchlistService.getRealtimePrice(req.user.userId, watchlistId);
+  }
+
   @Get(':watchlistId')
   @ApiOperation({ summary: '특정 관심 종목 상세 조회' })
   @ApiParam({ name: 'watchlistId', description: '관심 종목 ID' })
