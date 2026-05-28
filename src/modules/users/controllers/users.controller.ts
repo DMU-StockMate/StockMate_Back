@@ -136,11 +136,24 @@ export class UsersController {
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('accessToken')
+  @Patch()
+  @ApiOperation({ summary: '회원 정보 수정 (본인)' })
+  @ApiBody({ type: UpdateUserDto })
+  @ApiResponse({ status: 200, description: '회원 정보 수정 성공' })
+  async updateCurrentUser(
+    @Request() req,
+    @Body() updateUserDto: UpdateUserDto,
+  ) {
+    return await this.usersService.update(req.user.userId, updateUserDto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('accessToken')
   @Patch('me')
   @ApiOperation({ summary: '회원 정보 수정 (본인)' })
   @ApiBody({ type: UpdateUserDto })
   @ApiResponse({ status: 200, description: '회원 정보 수정 성공' })
-  async update(@Request() req, @Body() updateUserDto: UpdateUserDto) {
+  async updateMe(@Request() req, @Body() updateUserDto: UpdateUserDto) {
     return await this.usersService.update(req.user.userId, updateUserDto);
   }
 }

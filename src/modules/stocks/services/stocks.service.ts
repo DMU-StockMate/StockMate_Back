@@ -11,6 +11,7 @@ import { StockSearchQueryDto } from '../dto/stock-search-query.dto';
 import { UpdateStockDto } from '../dto/update-stock.dto';
 import { UpdateStockStatusDto } from '../dto/update-stock-status.dto';
 import { StockDetail } from '../entities/stock-detail.entity';
+import { StockInvestmentIndicator } from '../entities/stock-investment-indicator.entity';
 import { StockPriceDaily } from '../entities/stock-price-daily.entity';
 import { Stock, StockStatus } from '../entities/stock.entity';
 import { StockMarket } from '../../enums/stock-market.enum';
@@ -27,6 +28,9 @@ export class StocksService {
 
     @InjectRepository(StockPriceDaily)
     private readonly stockPriceDailyRepository: Repository<StockPriceDaily>,
+
+    @InjectRepository(StockInvestmentIndicator)
+    private readonly stockInvestmentIndicatorRepository: Repository<StockInvestmentIndicator>,
 
     private readonly kiwoomWebSocketService: KiwoomWebSocketService,
   ) {}
@@ -227,6 +231,9 @@ export class StocksService {
       currentPrice !== null && totalShares !== null
         ? currentPrice * totalShares
         : null;
+    const latestIndicator = await this.findLatestInvestmentIndicator(
+      stock.stockId,
+    );
 
     return {
       stockId: stock.stockId,
@@ -246,13 +253,16 @@ export class StocksService {
             ? Math.round(marketCapFromPrice).toString()
             : null,
       indicators: {
-        per: null,
-        pbr: null,
-        eps: null,
-        bps: null,
-        roe: null,
-        dividendYield: null,
+        per: latestIndicator?.per ?? null,
+        pbr: latestIndicator?.pbr ?? null,
+        eps: latestIndicator?.eps ?? null,
+        bps: latestIndicator?.bps ?? null,
+        roe: latestIndicator?.roe ?? null,
+        dividendYield: latestIndicator?.dividendYield ?? null,
+        dps: latestIndicator?.dps ?? null,
       },
+      indicatorTradeDate: latestIndicator?.tradeDate ?? null,
+      indicatorSource: latestIndicator?.source ?? null,
       dataAvailability: {
         marketCap:
           stock.detail?.marketCap !== null &&
@@ -260,7 +270,9 @@ export class StocksService {
         totalShares:
           stock.detail?.totalShares !== null &&
           stock.detail?.totalShares !== undefined,
-        financialIndicators: false,
+        financialIndicators: latestIndicator
+          ? this.hasInvestmentIndicatorValue(latestIndicator)
+          : false,
       },
     };
   }
@@ -381,6 +393,29 @@ export class StocksService {
       },
       take: 2,
     });
+  }
+
+  private async findLatestInvestmentIndicator(stockId: number) {
+    return this.stockInvestmentIndicatorRepository.findOne({
+      where: {
+        stockId,
+      },
+      order: {
+        tradeDate: 'DESC',
+      },
+    });
+  }
+
+  private hasInvestmentIndicatorValue(indicator: StockInvestmentIndicator) {
+    return [
+      indicator.per,
+      indicator.pbr,
+      indicator.eps,
+      indicator.bps,
+      indicator.roe,
+      indicator.dividendYield,
+      indicator.dps,
+    ].some((value) => value !== null && value !== undefined);
   }
 
   private calculatePriceChange(
