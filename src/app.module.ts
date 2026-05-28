@@ -1,23 +1,20 @@
+import { RedisModule } from '@nestjs-modules/ioredis';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { UsersModule } from './modules/users/users.module';
-import { RedisModule } from '@nestjs-modules/ioredis';
-import { AdminModule } from './modules/users/admin.module';
-import { LearningModule } from './modules/learning/learning.module';
+import { AiModule } from './modules/ai/ai.module';
+import { CommunityModule } from './modules/community/community.module';
+import { DartModule } from './modules/dart/dart.module';
 import { InvestmentProfileModule } from './modules/investment-profile/investment-profile.module';
 import { KrxModule } from './modules/krx/krx.module';
-import { AiModule } from './modules/ai/ai.module';
-import { DartModule } from './modules/dart/dart.module';
-import { StocksModule } from './modules/stocks/stocks.module';
-import { TradingModule } from './modules/trading/trading.module';
-import { WatchlistModule } from './modules/watchlist/watchlist.module';
-<<<<<<< HEAD
-import { CommunityModule } from './modules/community/community.module';
+import { LearningModule } from './modules/learning/learning.module';
 import { NewsModule } from './modules/news/news.module';
 import { NotificationModule } from './modules/notification/notification.module';
-=======
->>>>>>> f171976 (feat: add watchlist API and improve profile management)
+import { StocksModule } from './modules/stocks/stocks.module';
+import { TradingModule } from './modules/trading/trading.module';
+import { AdminModule } from './modules/users/admin.module';
+import { UsersModule } from './modules/users/users.module';
+import { WatchlistModule } from './modules/watchlist/watchlist.module';
 
 @Module({
   imports: [

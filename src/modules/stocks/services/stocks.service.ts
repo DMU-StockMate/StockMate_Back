@@ -42,6 +42,9 @@ export class StocksService {
     private readonly stockPriceDailyRepository: Repository<StockPriceDaily>,
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> b1364d1 (feat: add stock indicators and daily market data sync)
     @InjectRepository(StockInvestmentIndicator)
     private readonly stockInvestmentIndicatorRepository: Repository<StockInvestmentIndicator>,
 
@@ -414,11 +417,17 @@ export class StocksService {
         ? currentPrice * totalShares
         : null;
 <<<<<<< HEAD
+<<<<<<< HEAD
     const latestIndicator = await this.findLatestInvestmentIndicator(
       stock.stockId,
     );
 =======
 >>>>>>> f171976 (feat: add watchlist API and improve profile management)
+=======
+    const latestIndicator = await this.findLatestInvestmentIndicator(
+      stock.stockId,
+    );
+>>>>>>> b1364d1 (feat: add stock indicators and daily market data sync)
 
     return {
       stockId: stock.stockId,
@@ -439,6 +448,9 @@ export class StocksService {
             : null,
       indicators: {
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> b1364d1 (feat: add stock indicators and daily market data sync)
         per: latestIndicator?.per ?? null,
         pbr: latestIndicator?.pbr ?? null,
         eps: latestIndicator?.eps ?? null,
@@ -446,6 +458,7 @@ export class StocksService {
         roe: latestIndicator?.roe ?? null,
         dividendYield: latestIndicator?.dividendYield ?? null,
         dps: latestIndicator?.dps ?? null,
+<<<<<<< HEAD
       },
       indicatorTradeDate: latestIndicator?.tradeDate ?? null,
       indicatorSource: latestIndicator?.source ?? null,
@@ -458,6 +471,11 @@ export class StocksService {
         dividendYield: null,
       },
 >>>>>>> f171976 (feat: add watchlist API and improve profile management)
+=======
+      },
+      indicatorTradeDate: latestIndicator?.tradeDate ?? null,
+      indicatorSource: latestIndicator?.source ?? null,
+>>>>>>> b1364d1 (feat: add stock indicators and daily market data sync)
       dataAvailability: {
         marketCap:
           stock.detail?.marketCap !== null &&
@@ -466,12 +484,18 @@ export class StocksService {
           stock.detail?.totalShares !== null &&
           stock.detail?.totalShares !== undefined,
 <<<<<<< HEAD
+<<<<<<< HEAD
         financialIndicators: latestIndicator
           ? this.hasInvestmentIndicatorValue(latestIndicator)
           : false,
 =======
         financialIndicators: false,
 >>>>>>> f171976 (feat: add watchlist API and improve profile management)
+=======
+        financialIndicators: latestIndicator
+          ? this.hasInvestmentIndicatorValue(latestIndicator)
+          : false,
+>>>>>>> b1364d1 (feat: add stock indicators and daily market data sync)
       },
     };
   }
@@ -615,6 +639,20 @@ export class StocksService {
   }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+  private async findLatestInvestmentIndicator(stockId: number) {
+    return this.stockInvestmentIndicatorRepository.findOne({
+      where: {
+        stockId,
+      },
+      order: {
+        tradeDate: 'DESC',
+      },
+    });
+  }
+
+>>>>>>> b1364d1 (feat: add stock indicators and daily market data sync)
   private hasInvestmentIndicatorValue(indicator: StockInvestmentIndicator) {
     return [
       indicator.per,
@@ -627,9 +665,12 @@ export class StocksService {
     ].some((value) => value !== null && value !== undefined);
   }
 
+<<<<<<< HEAD
   async findLatestDailyPrice(ticker: string) {
     const snapshot = await this.resolveCurrentPriceSnapshot(ticker);
 =======
+=======
+>>>>>>> b1364d1 (feat: add stock indicators and daily market data sync)
   private calculatePriceChange(
     latestPrice?: StockPriceDaily,
     previousPrice?: StockPriceDaily,

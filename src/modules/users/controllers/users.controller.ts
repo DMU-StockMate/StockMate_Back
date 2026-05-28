@@ -163,6 +163,9 @@ export class UsersController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('accessToken')
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> b1364d1 (feat: add stock indicators and daily market data sync)
   @Patch()
   @ApiOperation({ summary: '회원 정보 수정 (본인)' })
   @ApiBody({ type: UpdateUserDto })
@@ -174,6 +177,7 @@ export class UsersController {
     return await this.usersService.update(req.user.userId, updateUserDto);
   }
 
+<<<<<<< HEAD
 @Post('me/profile-image')
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth('accessToken')
@@ -295,11 +299,15 @@ deleteProfileImage(@Req() req) {
   );
 }
 =======
+=======
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('accessToken')
+>>>>>>> b1364d1 (feat: add stock indicators and daily market data sync)
   @Patch('me')
   @ApiOperation({ summary: '회원 정보 수정 (본인)' })
   @ApiBody({ type: UpdateUserDto })
   @ApiResponse({ status: 200, description: '회원 정보 수정 성공' })
-  async update(@Request() req, @Body() updateUserDto: UpdateUserDto) {
+  async updateMe(@Request() req, @Body() updateUserDto: UpdateUserDto) {
     return await this.usersService.update(req.user.userId, updateUserDto);
   }
 >>>>>>> f171976 (feat: add watchlist API and improve profile management)
