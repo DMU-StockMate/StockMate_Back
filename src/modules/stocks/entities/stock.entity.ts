@@ -7,6 +7,7 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { StockDetail } from './stock-detail.entity';
+import { StockInvestmentIndicator } from './stock-investment-indicator.entity';
 import { StockPriceDaily } from './stock-price-daily.entity';
 
 export enum StockStatus {
@@ -53,4 +54,7 @@ export class Stock {
 
   @OneToMany(() => StockPriceDaily, (price) => price.stock)
   prices?: StockPriceDaily[];
+
+  @OneToMany(() => StockInvestmentIndicator, (indicator) => indicator.stock)
+  investmentIndicators?: StockInvestmentIndicator[];
 }

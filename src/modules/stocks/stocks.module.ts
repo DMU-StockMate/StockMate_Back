@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Stock } from './entities/stock.entity';
 import { StockDetail } from './entities/stock-detail.entity';
+import { StockInvestmentIndicator } from './entities/stock-investment-indicator.entity';
 import { StockPriceDaily } from './entities/stock-price-daily.entity';
 import { AdminStocksController } from './controllers/admin-stocks.controller';
 import { StocksController } from './controllers/stocks.controller';
@@ -14,6 +15,7 @@ import { KiwoomWebSocketService } from '../kiwoom/services/kiwoom-websocket.serv
     TypeOrmModule.forFeature([
       Stock,
       StockDetail,
+      StockInvestmentIndicator,
       StockPriceDaily,
     ]),
   ],

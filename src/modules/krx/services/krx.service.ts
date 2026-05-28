@@ -7,9 +7,14 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Not, Repository } from 'typeorm';
 import { KrxClient } from '../clients/krx.client';
 import { KRX_API_URLS, KRX_MARKETS } from '../constants/krx.constants';
-import { mapKrxDailyPrice, mapKrxStock } from '../mappers/krx.mapper';
+import {
+  mapKrxDailyPrice,
+  mapKrxInvestmentIndicator,
+  mapKrxStock,
+} from '../mappers/krx.mapper';
 import { Stock } from '../../stocks/entities/stock.entity';
 import { StockDetail } from '../../stocks/entities/stock-detail.entity';
+import { StockInvestmentIndicator } from '../../stocks/entities/stock-investment-indicator.entity';
 import { StockPriceDaily } from '../../stocks/entities/stock-price-daily.entity';
 
 @Injectable()
@@ -25,6 +30,9 @@ export class KrxService {
 
     @InjectRepository(StockPriceDaily)
     private readonly stockPriceDailyRepository: Repository<StockPriceDaily>,
+
+    @InjectRepository(StockInvestmentIndicator)
+    private readonly stockInvestmentIndicatorRepository: Repository<StockInvestmentIndicator>,
   ) {}
 
   async syncAllStocks(date?: string) {
@@ -202,11 +210,13 @@ export class KrxService {
     return result.affected ?? 0;
   }
 
-  async syncDailyPrices(query: {
-    date?: string;
-    startDate?: string;
-    endDate?: string;
-  } = {}) {
+  async syncDailyPrices(
+    query: {
+      date?: string;
+      startDate?: string;
+      endDate?: string;
+    } = {},
+  ) {
     const { date, startDate, endDate } = query;
 
     if (startDate || endDate) {
@@ -217,9 +227,7 @@ export class KrxService {
       }
 
       if (startDate > endDate) {
-        throw new BadRequestException(
-          '시작일은 종료일보다 늦을 수 없습니다.',
-        );
+        throw new BadRequestException('시작일은 종료일보다 늦을 수 없습니다.');
       }
 
       return this.syncDailyPricesByDateRange(startDate, endDate);
@@ -257,10 +265,7 @@ export class KrxService {
     };
   }
 
-  private async syncDailyPricesByDateRange(
-    startDate: string,
-    endDate: string,
-  ) {
+  private async syncDailyPricesByDateRange(startDate: string, endDate: string) {
     const dates = this.getDateRange(startDate, endDate);
     const maxDays = 370;
 
@@ -316,12 +321,10 @@ export class KrxService {
       startDate,
       endDate,
       totalDays: results.length,
-      syncedDays: results.filter((result) => result.status === 'synced')
-        .length,
+      syncedDays: results.filter((result) => result.status === 'synced').length,
       skippedDays: results.filter((result) => result.status === 'skipped')
         .length,
-      failedDays: results.filter((result) => result.status === 'failed')
-        .length,
+      failedDays: results.filter((result) => result.status === 'failed').length,
       results,
     };
   }
@@ -361,6 +364,15 @@ export class KrxService {
       },
     });
     const stockByTicker = new Map(stocks.map((stock) => [stock.ticker, stock]));
+    const indicatorByTicker = new Map<
+      string,
+      ReturnType<typeof mapKrxInvestmentIndicator>
+    >(
+      rows.map((row) => [
+        String(row.ISU_SRT_CD || row.ISU_CD),
+        mapKrxInvestmentIndicator(row),
+      ]),
+    );
     const stockIds = stocks.map((stock) => stock.stockId);
     const tradeDate = mappedRows[0]?.tradeDate as any;
     const existingPrices =
@@ -381,6 +393,7 @@ export class KrxService {
     let unchangedCount = 0;
     const pricesToUpsert: Array<Partial<StockPriceDaily>> = [];
     const detailsToUpsert = new Map<number, Partial<StockDetail>>();
+    const indicatorsToUpsert: Array<Partial<StockInvestmentIndicator>> = [];
 
     for (const mapped of mappedRows) {
       const stock = stockByTicker.get(mapped.ticker);
@@ -392,8 +405,8 @@ export class KrxService {
 
       const existingPrice = existingPriceByStockId.get(stock.stockId);
       const priceToUpsert = {
-          stockId: stock.stockId,
-          tradeDate: mapped.tradeDate as any,
+        stockId: stock.stockId,
+        tradeDate: mapped.tradeDate as any,
         openPrice: mapped.openPrice,
         highPrice: mapped.highPrice,
         lowPrice: mapped.lowPrice,
@@ -427,6 +440,23 @@ export class KrxService {
           totalShares: mapped.totalShares,
         });
       }
+
+      const indicator = indicatorByTicker.get(mapped.ticker);
+
+      if (indicator?.tradeDate && this.hasInvestmentIndicatorValue(indicator)) {
+        indicatorsToUpsert.push({
+          stockId: stock.stockId,
+          tradeDate: indicator.tradeDate as any,
+          per: indicator.per,
+          pbr: indicator.pbr,
+          eps: indicator.eps,
+          bps: indicator.bps,
+          roe: indicator.roe,
+          dividendYield: indicator.dividendYield,
+          dps: indicator.dps,
+          source: 'KRX',
+        });
+      }
     }
 
     if (pricesToUpsert.length > 0) {
@@ -441,6 +471,13 @@ export class KrxService {
         Array.from(detailsToUpsert.values()),
         ['stockId'],
       );
+    }
+
+    if (indicatorsToUpsert.length > 0) {
+      await this.stockInvestmentIndicatorRepository.upsert(indicatorsToUpsert, [
+        'stockId',
+        'tradeDate',
+      ]);
     }
 
     return {
@@ -502,6 +539,20 @@ export class KrxService {
     nextValue: string | number | null | undefined,
   ) {
     return String(currentValue ?? '') === String(nextValue ?? '');
+  }
+
+  private hasInvestmentIndicatorValue(
+    indicator: ReturnType<typeof mapKrxInvestmentIndicator>,
+  ) {
+    return [
+      indicator.per,
+      indicator.pbr,
+      indicator.eps,
+      indicator.bps,
+      indicator.roe,
+      indicator.dividendYield,
+      indicator.dps,
+    ].some((value) => value !== null && value !== undefined);
   }
 
   private getRows(data: any) {

@@ -6,6 +6,22 @@ export function removeComma(value: unknown) {
   return String(value).replaceAll(',', '');
 }
 
+export function removeDecimal(value: unknown) {
+  const normalized = removeComma(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  const cleaned = normalized.replace('%', '').trim();
+
+  if (!cleaned || cleaned === '-' || cleaned.toUpperCase() === 'N/A') {
+    return null;
+  }
+
+  return Number.isFinite(Number(cleaned)) ? cleaned : null;
+}
+
 export function parseKrxDate(value: string | null | undefined) {
   if (!value) {
     return null;
@@ -49,5 +65,19 @@ export function mapKrxDailyPrice(row: any) {
 
     marketCap: removeComma(row.MKTCAP),
     totalShares: removeComma(row.LIST_SHRS),
+  };
+}
+
+export function mapKrxInvestmentIndicator(row: any) {
+  return {
+    ticker: row.ISU_SRT_CD || row.ISU_CD,
+    tradeDate: parseKrxDate(row.BAS_DD || row.TRD_DD),
+    per: removeDecimal(row.PER || row.FWD_PER),
+    pbr: removeDecimal(row.PBR),
+    eps: removeDecimal(row.EPS || row.FWD_EPS),
+    bps: removeDecimal(row.BPS),
+    roe: removeDecimal(row.ROE),
+    dividendYield: removeDecimal(row.DVD_YLD || row.DIV_YIELD),
+    dps: removeDecimal(row.DPS),
   };
 }
