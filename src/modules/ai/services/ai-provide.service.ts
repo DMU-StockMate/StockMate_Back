@@ -49,32 +49,22 @@ export class AiLlamaProviderService {
     });
   }
 
-// // 연결 전 정상 동작 테스트
-// async streamChat(params: {
-//   context: unknown;
-//   onToken: (token: string) => void;
-// }): Promise<string> {
+  //문제 생성 서비스 
+  async generateQuestion(context: unknown) {
+    const baseUrl = this.configService.get<string>('LLAMA_API_URL');
 
-//   const fakeResponse = [
-//     'PER은 ',
-//     '기업의 ',
-//     '수익 대비 ',
-//     '주가 수준을 ',
-//     '의미합니다.'
-//   ];
+    if (!baseUrl) {
+      throw new InternalServerErrorException(
+        'LLAMA_API_URL이 설정되지 않았습니다.',
+      );
+    }
 
-//   let fullText = '';
+    const response = await axios.post(
+      `${baseUrl}/quiz/generate`,
+      context,
+    );
 
-//   for (const token of fakeResponse) {
-//     fullText += token;
+    return response.data;
+  }
 
-//     params.onToken(token);
-
-//     await new Promise(resolve =>
-//       setTimeout(resolve, 300),
-//     );
-//   }
-
-//   return fullText;
-// }
 }

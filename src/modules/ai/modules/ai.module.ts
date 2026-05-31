@@ -9,6 +9,11 @@ import { AiChatSession } from '../entities/ai-chat-session.entity';
 import { AiChatMessage } from '../entities/ai-chat-message.entity';
 import { User } from 'src/modules/users/entities/user.entity';
 import { QuizQuestion } from 'src/modules/learning/entities/quiz-question.entity';
+import { TopicName } from 'src/modules/learning/entities/topic-name.entity';
+import { InvestmentLevel } from 'src/modules/learning/entities/investment-level.entity';
+import { QuizChoice } from 'src/modules/learning/entities/quiz-choice.entity';
+import { AiQuestionService } from '../services/ai-question.service';
+import { AiQuestionController } from '../controllers/ai-question.controller';
 
 @Module({
   imports: [
@@ -17,10 +22,13 @@ import { QuizQuestion } from 'src/modules/learning/entities/quiz-question.entity
       AiChatMessage,
       User,
       QuizQuestion,
+      QuizChoice,
+      TopicName,
+      InvestmentLevel,
     ]),
   ],
-  controllers: [AiChatController],
-  providers: [AiChatService, AiLlamaProviderService],
+  controllers: [AiChatController,AiQuestionController],
+  providers: [AiChatService, AiLlamaProviderService, AiQuestionService],
   exports: [AiChatService],
 })
 export class AiModule {}
