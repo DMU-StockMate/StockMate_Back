@@ -8,6 +8,7 @@ import { LearningModule } from './modules/learning/learning.module';
 import { KrxModule } from './modules/krx/krx.module';
 import { StocksModule } from './modules/stocks/stocks.module';      
 import { AiModule } from './modules/ai/modules/ai.module';
+import { DartModule } from './modules/dart/dart.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { AiModule } from './modules/ai/modules/ai.module';
     KrxModule,
     StocksModule,
     AiModule,
+    DartModule,
   ],
 })
 export class AppModule {}
