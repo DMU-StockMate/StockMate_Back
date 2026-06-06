@@ -29,7 +29,6 @@ import { JwtAuthGuard } from 'src/modules/users/guards/jwt-auth.guard';
 import { LearningService } from '../service/learning.service';
 import { SubmitAnswerDto } from '../dto/submit-answer.dto';
 import { QuestionResponseDto } from '../dto/reponse.dto';
-import { QuestionAiChatRequestDto } from '../dto/question-ai-chat-request.dto';
 
 @ApiTags('learning')
 @ApiBearerAuth('accessToken')

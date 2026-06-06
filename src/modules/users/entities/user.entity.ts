@@ -2,11 +2,15 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  JoinColumn,
+  ManyToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { UserStatus } from 'src/modules/enums/user-status.enum'; 
 import { UserRole } from 'src/modules/enums/role-enum';
+import { InvestmentLevel } from 'src/modules/learning/entities/investment-level.entity';
+
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn({ type: 'bigint', unsigned: true, name: 'user_id' })
@@ -27,7 +31,7 @@ export class User {
   @Column({ type: 'varchar', length: 20 })
   phone: string;
 
-  //enum 추천
+  //enum 
   @Column({
     type: 'enum',
     enum: UserRole,
@@ -50,8 +54,20 @@ export class User {
   })
   ban_until: Date | null;
 
-  @Column({ type: 'int', name: 'investment_level_id', nullable: true })
-  investment_level_id: number;
+    @Column({
+    type: 'int',
+    name: 'investment_level_id',
+    nullable: true,
+  })
+  investment_level_id: number | null;
+
+  //투자 수준 아이디 값을 초급 중급 고급 같은 값으로 사용하기 위해 조인 사용
+  @ManyToOne(() => InvestmentLevel, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'investment_level_id' })
+  investmentLevel: InvestmentLevel | null;
 
   @Column({
     type: 'varchar',

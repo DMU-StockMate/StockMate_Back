@@ -374,4 +374,6 @@ export class StocksController {
   getCurrentPrice(@Param('ticker') ticker: string) {
     return this.stocksService.getCurrentPrice(ticker);
   }
+
+  
 }
