@@ -11,7 +11,6 @@ import { Repository } from 'typeorm';
 import { QuizQuestion } from '../entities/quiz-question.entity';
 import { QuizAttempt } from '../entities/quiz-attempt.entity';
 import { QuizBookmark } from '../entities/quiz-bookmark.entity';
-import { User } from '../../users/entities/user.entity';
 import { SubmitAnswerDto } from '../dto/submit-answer.dto';
 import { QuestionResponseDto } from '../dto/reponse.dto';
 
@@ -27,8 +26,6 @@ export class LearningService {
     @InjectRepository(QuizBookmark)
     private readonly bookmarkRepository: Repository<QuizBookmark>,
 
-    @InjectRepository(User)
-    private readonly userRepository: Repository<User>,
   ) {}
 
   async findAllQuestions() {
