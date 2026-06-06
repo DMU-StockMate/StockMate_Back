@@ -1,11 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Param,
-  Post,
-  Query,
-} from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBody,
@@ -114,12 +107,8 @@ export class StocksController {
 - 실시간 시세 구독 요청 중 서버 오류가 발생했습니다.
     `,
   })
-  subscribeRealtime(
-    @Body() dto: SubscribeStocksDto,
-  ) {
-    return this.stocksService.subscribeRealtime(
-      dto.stockCodes,
-    );
+  subscribeRealtime(@Body() dto: SubscribeStocksDto) {
+    return this.stocksService.subscribeRealtime(dto.stockCodes);
   }
 
   @Post('realtime/unsubscribe')
@@ -155,12 +144,8 @@ export class StocksController {
 - 실시간 시세 구독 해제 요청 중 서버 오류가 발생했습니다.
     `,
   })
-  unsubscribeRealtime(
-    @Body() dto: SubscribeStocksDto,
-  ) {
-    return this.stocksService.unsubscribeRealtime(
-      dto.stockCodes,
-    );
+  unsubscribeRealtime(@Body() dto: SubscribeStocksDto) {
+    return this.stocksService.unsubscribeRealtime(dto.stockCodes);
   }
 
   @Get('realtime/prices')
@@ -332,7 +317,7 @@ export class StocksController {
     example: '005930',
     description: '종목 코드',
   })
-  @ApiResponse({ status: 501, description: '투자 지표 테이블 미구현' })
+  @ApiResponse({ status: 200, description: '투자 지표 조회 성공' })
   findIndicators(@Param('ticker') ticker: string) {
     return this.stocksService.findIndicators(ticker);
   }
@@ -377,7 +362,7 @@ export class StocksController {
   findLatestDailyPrice(@Param('ticker') ticker: string) {
     return this.stocksService.findLatestDailyPrice(ticker);
   }
-      @Get(':ticker/price')
+  @Get(':ticker/realtime/price')
   @ApiOperation({ summary: '종목 실시간 가격 조회' })
   @ApiParam({
     name: 'ticker',
