@@ -150,6 +150,22 @@ export class AiChatService {
 
     const recentMessages = session.messages.slice(-10);
 
+    console.log(
+      'AI 이어가기 history:',
+      JSON.stringify(
+        recentMessages.map((msg) => ({
+          role:
+            msg.sender_type === 'USER'
+              ? 'user'
+              : 'assistant',
+          content: msg.message_text,
+          createdAt: msg.created_at,
+        })),
+        null,
+        2,
+      ),
+    );
+
     const context = this.buildFollowUpContext(
     session,
     recentMessages,
