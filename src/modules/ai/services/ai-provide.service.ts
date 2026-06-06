@@ -13,7 +13,8 @@ export class AiLlamaProviderService {
     context: unknown;
     onToken: (token: string) => void;
   }): Promise<string> {
-    const baseUrl = this.configService.get<string>('LLAMA_API_URL');
+    const baseUrl =
+      this.configService.get<string>('LLAMA_API_URL');
 
     if (!baseUrl) {
       throw new InternalServerErrorException(
@@ -21,60 +22,100 @@ export class AiLlamaProviderService {
       );
     }
 
-    let fullText = '';
+    try {
+      const response = await axios.post(
+        `${baseUrl}/chat/stream`,
+        params.context,
+        {
+          responseType: 'stream',
+        },
+      );
 
-    const response = await axios.post(
-      `${baseUrl}/chat/stream`,
-      params.context,
-      {
-        responseType: 'stream',
-      },
-    );
+      let fullText = '';
+      let buffer = '';
 
-    return new Promise((resolve, reject) => {
-      response.data.on('data', (chunk: Buffer) => {
-        const text = chunk.toString();
+      return await new Promise<string>((resolve, reject) => {
+        response.data.on('data', (chunk: Buffer) => {
+          buffer += chunk.toString('utf-8');
 
-        fullText += text;
-        params.onToken(text);
+          const events = buffer.split('\n\n');
+
+          // 마지막 조각은 아직 덜 도착했을 수 있으므로 남겨둠
+          buffer = events.pop() ?? '';
+
+          for (const event of events) {
+            const lines = event
+              .split('\n')
+              .map((line) => line.trim())
+              .filter((line) => line.startsWith('data:'));
+
+            for (const line of lines) {
+              const dataText = line
+                .replace(/^data:\s*/, '')
+                .trim();
+
+              if (!dataText) {
+                continue;
+              }
+
+              if (dataText === '[DONE]') {
+                resolve(fullText);
+                return;
+              }
+
+              try {
+                const parsed = JSON.parse(dataText);
+
+                if (parsed.type === 'token') {
+                  const token = parsed.content ?? '';
+
+                  fullText += token;
+                  params.onToken(token);
+                  continue;
+                }
+
+                if (parsed.type === 'error') {
+                  reject(
+                    new Error(
+                      parsed.message ?? 'AI 서버 스트리밍 오류',
+                    ),
+                  );
+                  return;
+                }
+
+                // meta, done은 사용자 답변 본문이 아니므로 저장하지 않음
+                if (
+                  parsed.type === 'meta' ||
+                  parsed.type === 'done'
+                ) {
+                  continue;
+                }
+              } catch {
+                console.error(
+                  'AI SSE JSON 파싱 실패:',
+                  dataText,
+                );
+              }
+            }
+          }
+        });
+
+        response.data.on('end', () => {
+          resolve(fullText);
+        });
+
+        response.data.on('error', (error: unknown) => {
+          reject(error);
+        });
       });
+    } catch (error: any) {
+      console.error('AI 서버 요청 실패');
+      console.error('status:', error.response?.status);
+      console.error('message:', error.message);
 
-      response.data.on('end', () => {
-        resolve(fullText);
-      });
-
-      response.data.on('error', (error: unknown) => {
-        reject(error);
-      });
-    });
+      throw new InternalServerErrorException(
+        'AI 서버 요청에 실패했습니다.',
+      );
+    }
   }
-
-// // 연결 전 정상 동작 테스트
-// async streamChat(params: {
-//   context: unknown;
-//   onToken: (token: string) => void;
-// }): Promise<string> {
-
-//   const fakeResponse = [
-//     'PER은 ',
-//     '기업의 ',
-//     '수익 대비 ',
-//     '주가 수준을 ',
-//     '의미합니다.'
-//   ];
-
-//   let fullText = '';
-
-//   for (const token of fakeResponse) {
-//     fullText += token;
-
-//     params.onToken(token);
-
-//     await new Promise(resolve =>
-//       setTimeout(resolve, 300),
-//     );
-//   }
-
-//   return fullText;
-// }
 }
