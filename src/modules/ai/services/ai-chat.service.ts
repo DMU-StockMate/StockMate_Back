@@ -148,10 +148,7 @@ export class AiChatService {
 
     this.setSseHeaders(res);
 
-    const recentMessages = session.messages
-      .slice(-8)
-      .map((msg) => `${msg.sender_type}: ${msg.message_text}`)
-      .join('\n');
+    const recentMessages = session.messages.slice(-10);
 
     const context = this.buildFollowUpContext(
     session,
@@ -183,67 +180,83 @@ export class AiChatService {
     res.end();
   }
 
-  private buildQuestionContext(
-    user: User,
-    question: QuizQuestion,
-    message: string,
+    private buildQuestionContext(
+      user: User,
+      question: QuizQuestion,
+      message: string,
     ) {
-    return {
+      return {
+        question: message,
+
+        history: [],
+
         user: {
-        userId: user.user_id,
-        investmentLevel:
+          user_id: user.user_id,
+          investment_level:
             user.investmentLevel?.levelName ?? '미설정',
         },
 
-        question: {
-        questionId: question.question_id,
-        questionType: question.question_type,
-        questionText: question.question_text,
-        explanation: question.explanation,
-        topic: question.topicName?.topicName ?? '미분류',
-        level:
+        quiz_context: {
+          question_id: question.question_id,
+          question_type: question.question_type,
+          question_text: question.question_text,
+          explanation: question.explanation,
+          topic: question.topicName?.topicName ?? '미분류',
+          level:
             question.investmentLevel?.levelName ?? '미설정',
-        choices: question.choices.map((choice) => ({
-            choiceNo: choice.choice_no,
-            text: choice.choice_text,
-            isCorrect: choice.is_correct,
-        })),
-        },
 
-        userMessage: message,
-    };
+          choices: question.choices.map((choice) => ({
+            choice_no: choice.choice_no,
+            text: choice.choice_text,
+            is_correct: choice.is_correct,
+          })),
+        },
+      };
     }
     private buildFollowUpContext(
-        session: AiChatSession,
-        recentMessages: string,
-        message: string,
-        ) {
-        return {
-            sessionId: session.session_id,
-            user: {
-            userId: session.user.user_id,
-            investmentLevel:
-                session.user.investmentLevel?.levelName ?? '미설정',
-            },
-            question: {
-            questionId: session.question?.question_id ?? null,
-            questionType: session.question?.question_type ?? null,
-            questionText: session.question?.question_text ?? null,
-            explanation: session.question?.explanation ?? null,
-            topic: session.question?.topicName?.topicName ?? '미분류',
-            level:
-                session.question?.investmentLevel?.levelName ?? '미설정',
-            choices:
-                session.question?.choices?.map((choice) => ({
-                choiceNo: choice.choice_no,
-                text: choice.choice_text,
-                isCorrect: choice.is_correct,
+      session: AiChatSession,
+      recentMessages: AiChatMessage[],
+      message: string,
+    ) {
+      return {
+        question: message,
+
+        history: recentMessages.map((msg) => ({
+          role:
+            msg.sender_type === 'USER'
+              ? 'user'
+              : 'assistant',
+          content: msg.message_text,
+        })),
+
+        user: {
+          user_id: session.user.user_id,
+          investment_level:
+            session.user.investmentLevel?.levelName ?? '미설정',
+        },
+
+        quiz_context: session.question
+          ? {
+              question_id: session.question.question_id,
+              question_type: session.question.question_type,
+              question_text: session.question.question_text,
+              explanation: session.question.explanation,
+              topic:
+                session.question.topicName?.topicName ?? '미분류',
+              level:
+                session.question.investmentLevel?.levelName ??
+                '미설정',
+
+              choices:
+                session.question.choices?.map((choice) => ({
+                  choice_no: choice.choice_no,
+                  text: choice.choice_text,
+                  is_correct: choice.is_correct,
                 })) ?? [],
-            },
-            recentMessages,
-            userMessage: message,
-        };
-        }
+            }
+          : null,
+      };
+    }
 
   private setSseHeaders(res: Response) {
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
