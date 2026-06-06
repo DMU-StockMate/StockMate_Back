@@ -16,6 +16,7 @@ import { JwtAuthGuard } from '../../users/guards/jwt-auth.guard';
 import { AiQuestionService } from '../services/ai-question.service';
 import { GenerateQuestionRequestDto } from '../dto/generate-question-request.dto';
 
+//git 변경 위해서 추가
 @ApiTags('ai-question')
 @ApiBearerAuth('accessToken')
 @UseGuards(JwtAuthGuard)
