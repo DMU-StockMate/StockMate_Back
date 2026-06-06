@@ -53,18 +53,13 @@ export class AiQuestionService {
     }
 
     const context = {
-      topic: {
-        topic_id: topic.topicId,
-        topic_name: topic.topicName,
-        description: topic.description,
+      user: {
+        user_id: 0,
+        investment_level:
+          investmentLevel.levelName ?? '미설정',
       },
-      investment_level: {
-        investment_level_id:
-          investmentLevel.investmentLevelId,
-        level_name: investmentLevel.levelName,
-        description: investmentLevel.description,
-      },
-      question_type: dto.questionType,
+      quiz_type: dto.questionType,
+      topic: topic.topicName,
     };
 
     const generated =
