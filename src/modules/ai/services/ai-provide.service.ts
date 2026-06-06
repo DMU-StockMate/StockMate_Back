@@ -118,4 +118,21 @@ export class AiLlamaProviderService {
       );
     }
   }
+  //문제 생성 서비스 
+  async generateQuestion(context: unknown) {
+    const baseUrl = this.configService.get<string>('LLAMA_API_URL');
+
+    if (!baseUrl) {
+      throw new InternalServerErrorException(
+        'LLAMA_API_URL이 설정되지 않았습니다.',
+      );
+    }
+
+    const response = await axios.post(
+      `${baseUrl}/quiz/generate`,
+      context,
+    );
+
+    return response.data;
+  }
 }
