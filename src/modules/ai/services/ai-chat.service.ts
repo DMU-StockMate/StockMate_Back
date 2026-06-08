@@ -30,6 +30,66 @@ export class AiChatService {
     private readonly aiProvider: AiLlamaProviderService,
   ) {}
 
+  async getChatSessions(userId: number, scope?: 'general' | 'question') {
+    const query = this.sessionRepository
+      .createQueryBuilder('session')
+      .leftJoinAndSelect('session.question', 'question')
+      .leftJoinAndSelect('session.messages', 'message')
+      .where('session.user_id = :userId', { userId })
+      .orderBy('session.created_at', 'DESC')
+      .addOrderBy('message.created_at', 'ASC');
+
+    if (scope === 'general') {
+      query.andWhere('question.question_id IS NULL');
+    }
+
+    if (scope === 'question') {
+      query.andWhere('question.question_id IS NOT NULL');
+    }
+
+    const sessions = await query.getMany();
+
+    return sessions.map((session) => {
+      const lastMessage =
+        session.messages.length > 0
+          ? session.messages[session.messages.length - 1]
+          : null;
+
+      return {
+        sessionId: session.session_id,
+        questionId: session.question?.question_id ?? null,
+        questionText: session.question?.question_text ?? null,
+        sessionType: session.session_type,
+        title: session.title ?? 'AI 대화',
+        preview: lastMessage?.message_text ?? '대화 기록이 없습니다.',
+        createdAt: session.created_at,
+        updatedAt: lastMessage?.created_at ?? session.created_at,
+        messages: this.toMessageDtos(session.messages),
+      };
+    });
+  }
+
+  async getChatSessionMessages(userId: number, sessionId: number) {
+    const session = await this.sessionRepository.findOne({
+      where: {
+        session_id: sessionId,
+        user: { user_id: userId },
+      },
+      relations: ['messages'],
+      order: {
+        messages: {
+          created_at: 'ASC',
+        },
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('AI 대화 세션을 찾을 수 없습니다.');
+    }
+
+    return this.toMessageDtos(session.messages);
+  }
+
   async startQuestionChatStream(
     userId: number,
     questionId: number,
@@ -61,7 +121,7 @@ export class AiChatService {
       this.sessionRepository.create({
         user,
         question,
-        session_type: 'GENERAL',
+        session_type: 'FEEDBACK',
         title: `문제 ${questionId} AI 질문`,
       }),
     );
@@ -395,5 +455,14 @@ export class AiChatService {
     }
 
     return 'AI 서버 요청에 실패했습니다.';
+  }
+
+  private toMessageDtos(messages: AiChatMessage[]) {
+    return messages.map((message) => ({
+      messageId: message.message_id,
+      senderType: message.sender_type,
+      messageText: message.message_text,
+      createdAt: message.created_at,
+    }));
   }
 }

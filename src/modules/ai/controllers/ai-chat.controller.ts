@@ -1,9 +1,11 @@
 import {
   Body,
   Controller,
+  Get,
   Param,
   ParseIntPipe,
   Post,
+  Query,
   Req,
   Res,
   UseGuards,
@@ -32,6 +34,58 @@ import { QuestionAiChatRequestDto } from '../dto/question-ai-chat-request.dto';
   @Controller('ai')
   export class AiChatController {
     constructor(private readonly aiChatService: AiChatService) {}
+
+  @Get('chat-sessions')
+  @ApiOperation({
+    summary: 'AI 대화 세션 목록 조회',
+    description:
+      '로그인 사용자의 AI 대화 세션 목록과 각 세션의 메시지 기록을 최신 세션 순서로 조회합니다.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'AI 대화 세션 목록',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'JWT 인증이 필요합니다.',
+  })
+  getChatSessions(
+    @Req() req,
+    @Query('scope') scope?: 'general' | 'question',
+  ) {
+    return this.aiChatService.getChatSessions(req.user.userId, scope);
+  }
+
+  @Get('chat-sessions/:sessionId/messages')
+  @ApiOperation({
+    summary: 'AI 대화 세션 메시지 조회',
+    description:
+      '로그인 사용자의 특정 AI 대화 세션에 저장된 메시지 목록을 시간순으로 조회합니다.',
+  })
+  @ApiParam({
+    name: 'sessionId',
+    type: Number,
+    example: 1,
+    description: 'AI 대화 세션 ID',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'AI 대화 세션 메시지 목록',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'JWT 인증이 필요합니다.',
+  })
+  @ApiNotFoundResponse({
+    description: 'AI 대화 세션을 찾을 수 없는 경우',
+  })
+  getChatSessionMessages(
+    @Req() req,
+    @Param('sessionId', ParseIntPipe) sessionId: number,
+  ) {
+    return this.aiChatService.getChatSessionMessages(
+      req.user.userId,
+      sessionId,
+    );
+  }
 
   @Post('chat/stream')
   @ApiOperation({
