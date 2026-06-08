@@ -85,15 +85,108 @@ export class AiChatService {
         message,
     );
 
-    const aiText = await this.aiProvider.streamChat({
-      context,
-      onToken: (token) => {
-        this.sendSse(res, {
-          type: 'token',
-          content: token,
-        });
-      },
+    let aiText = '';
+
+    try {
+      aiText = await this.aiProvider.streamChat({
+        context,
+        onToken: (token) => {
+          this.sendSse(res, {
+            type: 'token',
+            content: token,
+          });
+        },
+      });
+    } catch (error) {
+      this.sendSse(res, {
+        type: 'error',
+        message: this.getAiErrorMessage(error),
+      });
+      res.end();
+      return;
+    }
+
+    await this.messageRepository.save({
+      session,
+      sender_type: 'AI',
+      message_text: aiText,
     });
+
+    this.sendSse(res, {
+      type: 'done',
+      sessionId: session.session_id,
+    });
+
+    res.end();
+  }
+
+  async startGeneralChatStream(
+    userId: number,
+    message: string,
+    res: Response,
+  ) {
+    const user = await this.userRepository.findOne({
+      where: { user_id: userId },
+      relations: ['investmentLevel'],
+    });
+
+    if (!user) {
+      throw new NotFoundException('사용자를 찾을 수 없습니다.');
+    }
+
+    const session = await this.sessionRepository.save(
+      this.sessionRepository.create({
+        user,
+        question: null,
+        session_type: 'GENERAL',
+        title: message.slice(0, 40),
+      }),
+    );
+
+    await this.messageRepository.save({
+      session,
+      sender_type: 'USER',
+      message_text: message,
+    });
+
+    this.setSseHeaders(res);
+
+    this.sendSse(res, {
+      type: 'session',
+      sessionId: session.session_id,
+    });
+
+    const context = {
+      question: message,
+      history: [],
+      user: {
+        user_id: user.user_id,
+        investment_level:
+          user.investmentLevel?.levelName ?? '미설정',
+      },
+      quiz_context: null,
+    };
+
+    let aiText = '';
+
+    try {
+      aiText = await this.aiProvider.streamChat({
+        context,
+        onToken: (token) => {
+          this.sendSse(res, {
+            type: 'token',
+            content: token,
+          });
+        },
+      });
+    } catch (error) {
+      this.sendSse(res, {
+        type: 'error',
+        message: this.getAiErrorMessage(error),
+      });
+      res.end();
+      return;
+    }
 
     await this.messageRepository.save({
       session,
@@ -172,15 +265,26 @@ export class AiChatService {
     message,
     );
 
-    const aiText = await this.aiProvider.streamChat({
-    context,
-    onToken: (token) => {
-        this.sendSse(res, {
-        type: 'token',
-        content: token,
-        });
-    },
-    });
+    let aiText = '';
+
+    try {
+      aiText = await this.aiProvider.streamChat({
+        context,
+        onToken: (token) => {
+          this.sendSse(res, {
+            type: 'token',
+            content: token,
+          });
+        },
+      });
+    } catch (error) {
+      this.sendSse(res, {
+        type: 'error',
+        message: this.getAiErrorMessage(error),
+      });
+      res.end();
+      return;
+    }
 
     await this.messageRepository.save({
       session,
@@ -283,5 +387,13 @@ export class AiChatService {
 
   private sendSse(res: Response, data: unknown) {
     res.write(`data: ${JSON.stringify(data)}\n\n`);
+  }
+
+  private getAiErrorMessage(error: unknown) {
+    if (error instanceof Error && error.message) {
+      return error.message;
+    }
+
+    return 'AI 서버 요청에 실패했습니다.';
   }
 }

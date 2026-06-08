@@ -11,22 +11,14 @@ import { parseStringPromise } from 'xml2js';
 @Injectable()
 export class DartService {
   private readonly baseUrl: string;
-  private readonly apiKey: string;
+  private readonly apiKey?: string;
 
   constructor(private readonly configService: ConfigService) {
     this.baseUrl =
       this.configService.get<string>('DART_API_BASE_URL') ??
       'https://opendart.fss.or.kr/api';
 
-    const apiKey = this.configService.get<string>('DART_API_KEY');
-
-    if (!apiKey) {
-      throw new InternalServerErrorException(
-        'DART_API_KEY가 설정되지 않았습니다.',
-      );
-    }
-
-    this.apiKey = apiKey;
+    this.apiKey = this.configService.get<string>('DART_API_KEY');
   }
 
   async buildStockAiContext(
@@ -58,11 +50,13 @@ export class DartService {
   }
 
   private async findCorpByStockCode(stockCode: string) {
+    const apiKey = this.getApiKey();
+
     const response = await axios.get(
       `${this.baseUrl}/corpCode.xml`,
       {
         params: {
-          crtfc_key: this.apiKey,
+          crtfc_key: apiKey,
         },
         responseType: 'arraybuffer',
       },
@@ -106,11 +100,13 @@ export class DartService {
     businessYear: string;
     reportCode: string;
   }) {
+    const apiKey = this.getApiKey();
+
     const response = await axios.get(
       `${this.baseUrl}/fnlttSinglAcnt.json`,
       {
         params: {
-          crtfc_key: this.apiKey,
+          crtfc_key: apiKey,
           corp_code: params.corpCode,
           bsns_year: params.businessYear,
           reprt_code: params.reportCode,
@@ -132,6 +128,16 @@ export class DartService {
       before_previous_amount: item.bfefrmtrm_amount,
       currency: item.currency,
     }));
+  }
+
+  private getApiKey() {
+    if (!this.apiKey) {
+      throw new InternalServerErrorException(
+        'DART_API_KEY가 설정되지 않았습니다.',
+      );
+    }
+
+    return this.apiKey;
   }
 
   private getReportName(reportCode: string) {

@@ -7,8 +7,24 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  const configuredOrigins = process.env.CORS_ORIGINS?.split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  const devOriginPattern = /^http:\/\/(localhost|127\.0\.0\.1):517\d$/;
+
   app.enableCors({
-    origin: ['http://localhost:5173'],
+    origin: (origin, callback) => {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      const isAllowed = configuredOrigins?.length
+        ? configuredOrigins.includes(origin)
+        : devOriginPattern.test(origin);
+
+      callback(isAllowed ? null : new Error(`CORS blocked for origin: ${origin}`), isAllowed);
+    },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
