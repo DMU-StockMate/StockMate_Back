@@ -33,6 +33,51 @@ import { QuestionAiChatRequestDto } from '../dto/question-ai-chat-request.dto';
   export class AiChatController {
     constructor(private readonly aiChatService: AiChatService) {}
 
+  @Post('chat/stream')
+  @ApiOperation({
+    summary: '일반 AI 채팅 SSE',
+    description:
+      '문제 ID 없이 사용자의 일반 투자 질문을 AI 서버에 전달하고 SSE 방식으로 답변을 스트리밍합니다.',
+  })
+  @ApiBody({
+    type: QuestionAiChatRequestDto,
+    description: 'AI에게 전달할 사용자 질문 메시지',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'SSE 스트리밍 응답 시작',
+    schema: {
+      example:
+        'data: {"type":"session","sessionId":1}\n\n' +
+        'data: {"type":"token","content":"확인해보면"}\n\n' +
+        'data: {"type":"done","sessionId":1}\n\n',
+    },
+  })
+  @ApiBadRequestResponse({
+    description:
+      '질문 메시지가 비어 있거나, 형식이 올바르지 않은 경우',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'JWT 인증이 필요합니다.',
+  })
+  @ApiNotFoundResponse({
+    description: '사용자를 찾을 수 없는 경우',
+  })
+  @ApiInternalServerErrorResponse({
+    description: '서버 내부 오류',
+  })
+  startGeneralChatStream(
+    @Req() req,
+    @Body() dto: QuestionAiChatRequestDto,
+    @Res() res: Response,
+  ) {
+    return this.aiChatService.startGeneralChatStream(
+      req.user.userId,
+      dto.message,
+      res,
+    );
+  }
+
   @Post('questions/:questionId/chat/stream')
   @ApiOperation({
     summary: '문제 기반 AI 질문 시작 SSE',
