@@ -3,17 +3,35 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
+import { Repository } from 'typeorm';
 import axios from 'axios';
 import AdmZip from 'adm-zip';
 import { parseStringPromise } from 'xml2js';
+import { Stock } from '../../stocks/entities/stock.entity';
+import { StockPriceDaily } from '../../stocks/entities/stock-price-daily.entity';
+import { StockInvestmentIndicator } from '../../stocks/entities/stock-investment-indicator.entity';
 
 @Injectable()
 export class DartService {
   private readonly baseUrl: string;
   private readonly apiKey?: string;
 
-  constructor(private readonly configService: ConfigService) {
+  // corpCode.xml은 수만 개 기업 목록이 담긴 3MB ZIP — 요청마다 다운로드하면 느리므로 메모리에 캐싱
+  private corpCodeCache: Map<string, { corpCode: string; corpName: string; stockCode: string }> | null = null;
+  private corpCodeCacheExpiresAt = 0; // epoch ms
+  private readonly CORP_CODE_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+
+  constructor(
+    private readonly configService: ConfigService,
+    @InjectRepository(Stock)
+    private readonly stockRepository: Repository<Stock>,
+    @InjectRepository(StockPriceDaily)
+    private readonly stockPriceDailyRepository: Repository<StockPriceDaily>,
+    @InjectRepository(StockInvestmentIndicator)
+    private readonly indicatorRepository: Repository<StockInvestmentIndicator>,
+  ) {
     this.baseUrl =
       this.configService.get<string>('DART_API_BASE_URL') ??
       'https://opendart.fss.or.kr/api';
@@ -49,38 +67,123 @@ export class DartService {
     };
   }
 
-  private async findCorpByStockCode(stockCode: string) {
-    const apiKey = this.getApiKey();
+  /**
+   * DART 재무제표에서 EPS, BPS, ROE, PER, PBR을 계산하고 DB에 저장합니다.
+   * businessYear 미지정 시 직전 연도 → 2년 전 순으로 자동 시도합니다.
+   */
+  async syncIndicators(
+    stockCode: string,
+    businessYear?: string,
+    reportCode: '11011' | '11012' | '11013' | '11014' = '11011',
+  ) {
+    const currentYear = new Date().getFullYear();
+    const yearsToTry = businessYear
+      ? [businessYear]
+      : [String(currentYear - 1), String(currentYear - 2)];
 
-    const response = await axios.get(
-      `${this.baseUrl}/corpCode.xml`,
-      {
-        params: {
-          crtfc_key: apiKey,
-        },
-        responseType: 'arraybuffer',
-      },
-    );
-
-    const zip = new AdmZip(response.data);
-    const xmlEntry = zip
-      .getEntries()
-      .find((entry) => entry.entryName.endsWith('.xml'));
-
-    if (!xmlEntry) {
-      throw new InternalServerErrorException(
-        'DART 고유번호 XML 파일을 찾을 수 없습니다.',
-      );
+    let lastError: unknown;
+    for (const year of yearsToTry) {
+      try {
+        return await this.syncIndicatorsForYear(stockCode, year, reportCode);
+      } catch (e) {
+        lastError = e;
+      }
     }
+    throw lastError;
+  }
 
-    const xml = xmlEntry.getData().toString('utf-8');
-    const parsed = await parseStringPromise(xml);
+  private async syncIndicatorsForYear(
+    stockCode: string,
+    businessYear: string,
+    reportCode: '11011' | '11012' | '11013' | '11014',
+  ) {
+    const corp = await this.findCorpByStockCode(stockCode);
 
-    const list = parsed.result.list ?? [];
+    const financials = await this.getSingleCompanyFinancials({
+      corpCode: corp.corpCode,
+      businessYear,
+      reportCode,
+    });
 
-    const found = list.find(
-      (item) => item.stock_code?.[0] === stockCode,
-    );
+    // 당기순이익: IS/CIS 구분에서 추출
+    const rawNetIncome = this.extractFinancialAmount(financials, ['당기순이익'], [
+      '법인세차감전',
+      '지배주주',
+      '비지배주주',
+    ]);
+
+    // 자본총계: BS 구분에서 추출
+    const rawTotalEquity = this.extractFinancialAmount(financials, ['자본총계'], [
+      '지배주주',
+      '비지배주주',
+    ]);
+
+    const stock = await this.stockRepository.findOne({
+      where: { ticker: stockCode },
+      relations: { detail: true },
+    });
+    if (!stock) throw new NotFoundException(`종목을 찾을 수 없습니다: ${stockCode}`);
+
+    const totalShares = this.parseAmount(stock.detail?.totalShares);
+    const latestPrice = await this.stockPriceDailyRepository.findOne({
+      where: { stockId: stock.stockId },
+      order: { tradeDate: 'DESC' },
+    });
+    const currentPrice = this.parseAmount(latestPrice?.closePrice) ?? 0;
+
+    // DART 재무제표 금액 단위 자동 감지 (백만원 vs 원)
+    const scale = this.detectAmountScale(rawTotalEquity, totalShares);
+    const netIncome = rawNetIncome !== null ? rawNetIncome * scale : null;
+    const totalEquity = rawTotalEquity !== null ? rawTotalEquity * scale : null;
+
+    // 지표 계산
+    const eps =
+      totalShares !== null && totalShares > 0 && netIncome !== null
+        ? netIncome / totalShares
+        : null;
+    const bps =
+      totalShares !== null && totalShares > 0 && totalEquity !== null
+        ? totalEquity / totalShares
+        : null;
+    // ROE는 scale 영향 없음 (분자·분모 동일 scale)
+    const roe =
+      rawTotalEquity !== null && rawTotalEquity > 0 && rawNetIncome !== null
+        ? (rawNetIncome / rawTotalEquity) * 100
+        : null;
+    const per = eps !== null && eps > 0 && currentPrice > 0 ? currentPrice / eps : null;
+    const pbr = bps !== null && bps > 0 && currentPrice > 0 ? currentPrice / bps : null;
+
+    const tradeDate = latestPrice?.tradeDate ?? `${businessYear}-12-31`;
+
+    // Upsert
+    let indicator = await this.indicatorRepository.findOne({
+      where: { stockId: stock.stockId, tradeDate },
+    });
+    if (!indicator) {
+      indicator = this.indicatorRepository.create({ stockId: stock.stockId, tradeDate });
+    }
+    indicator.eps = eps !== null ? eps.toFixed(4) : null;
+    indicator.bps = bps !== null ? bps.toFixed(4) : null;
+    indicator.roe = roe !== null ? roe.toFixed(4) : null;
+    indicator.per = per !== null ? per.toFixed(4) : null;
+    indicator.pbr = pbr !== null ? pbr.toFixed(4) : null;
+    indicator.source = 'DART';
+
+    await this.indicatorRepository.save(indicator);
+
+    return {
+      ticker: stockCode,
+      corp: corp.corpName,
+      businessYear,
+      tradeDate,
+      scale,
+      indicators: { eps, bps, roe, per, pbr },
+    };
+  }
+
+  private async findCorpByStockCode(stockCode: string) {
+    const cache = await this.getCorpCodeCache();
+    const found = cache.get(stockCode);
 
     if (!found) {
       throw new NotFoundException(
@@ -88,11 +191,49 @@ export class DartService {
       );
     }
 
-    return {
-      corpCode: found.corp_code[0],
-      corpName: found.corp_name[0],
-      stockCode: found.stock_code[0],
-    };
+    return found;
+  }
+
+  private async getCorpCodeCache() {
+    const now = Date.now();
+    if (this.corpCodeCache && now < this.corpCodeCacheExpiresAt) {
+      return this.corpCodeCache;
+    }
+
+    const apiKey = this.getApiKey();
+
+    const response = await axios.get(`${this.baseUrl}/corpCode.xml`, {
+      params: { crtfc_key: apiKey },
+      responseType: 'arraybuffer',
+    });
+
+    const zip = new AdmZip(response.data as Buffer);
+    const xmlEntry = zip.getEntries().find((e) => e.entryName.endsWith('.xml'));
+
+    if (!xmlEntry) {
+      throw new InternalServerErrorException('DART 고유번호 XML 파일을 찾을 수 없습니다.');
+    }
+
+    const xml = xmlEntry.getData().toString('utf-8');
+    const parsed = await parseStringPromise(xml);
+    const list: Array<Record<string, string[]>> = parsed.result.list ?? [];
+
+    const map = new Map<string, { corpCode: string; corpName: string; stockCode: string }>();
+    for (const item of list) {
+      const code = item.stock_code?.[0];
+      if (code) {
+        map.set(code, {
+          corpCode: item.corp_code[0],
+          corpName: item.corp_name[0],
+          stockCode: code,
+        });
+      }
+    }
+
+    this.corpCodeCache = map;
+    this.corpCodeCacheExpiresAt = now + this.CORP_CODE_CACHE_TTL_MS;
+
+    return map;
   }
 
   private async getSingleCompanyFinancials(params: {
@@ -120,7 +261,7 @@ export class DartService {
       );
     }
 
-    return response.data.list.map((item) => ({
+    return (response.data.list as Array<Record<string, string>>).map((item) => ({
       account_name: item.account_nm,
       statement_name: item.sj_nm,
       current_amount: item.thstrm_amount,
@@ -128,6 +269,45 @@ export class DartService {
       before_previous_amount: item.bfefrmtrm_amount,
       currency: item.currency,
     }));
+  }
+
+  private extractFinancialAmount(
+    items: Array<{ account_name: string; statement_name: string; current_amount: string }>,
+    include: string[],
+    exclude: string[] = [],
+  ): number | null {
+    const item = items.find(
+      (i) =>
+        include.some((kw) => i.account_name.includes(kw)) &&
+        !exclude.some((kw) => i.account_name.includes(kw)),
+    );
+    return item ? this.parseAmount(item.current_amount) : null;
+  }
+
+  private parseAmount(value: string | number | null | undefined): number | null {
+    if (value === null || value === undefined) return null;
+    const num = Number(String(value).replace(/,/g, '').trim());
+    return Number.isFinite(num) ? num : null;
+  }
+
+  /**
+   * DART 재무제표 금액 단위를 추정합니다.
+   * 대부분의 상장사는 백만원(×1,000,000) 단위로 보고하므로,
+   * 원(원) 단위로 환산이 필요합니다.
+   *
+   * 판단 기준: 자본총계 / 발행주식수가 1원 미만이면 백만원 단위로 간주
+   */
+  private detectAmountScale(
+    rawTotalEquity: number | null,
+    totalShares: number | null,
+  ): number {
+    if (!totalShares || totalShares <= 0 || rawTotalEquity === null || rawTotalEquity <= 0) {
+      return 1_000_000; // totalShares 없으면 대부분 대형주 → 백만원 단위 가정
+    }
+    const rawBps = rawTotalEquity / totalShares;
+    // BPS가 1원 미만이지만 ×1M 시 100원 이상이면 백만원 단위
+    if (rawBps < 1 && rawBps * 1_000_000 >= 100) return 1_000_000;
+    return 1;
   }
 
   private getApiKey() {
