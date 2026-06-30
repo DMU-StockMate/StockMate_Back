@@ -10,7 +10,7 @@ async function bootstrap() {
   const configuredOrigins = process.env.CORS_ORIGINS?.split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
-  const devOriginPattern = /^http:\/\/(localhost|127\.0\.0\.1):517\d$/;
+  const devOriginPattern = /^http:\/\/(localhost|127\.0\.0\.1):(3000|517\d)$/;
 
   app.enableCors({
     origin: (origin, callback) => {
