@@ -19,6 +19,7 @@ import { LoginUserDto } from '../dto/login-user.dto';
 import { User } from '../entities/user.entity';
 import { CheckEmailDto } from '../dto/check-email.dto';
 import { CheckNickNameDto } from '../dto/check-nickname.dto';
+import { UserRole } from 'src/modules/enums/role-enum';
 
 @Injectable()
 export class UsersService {
@@ -45,6 +46,7 @@ export class UsersService {
       email,
       password_hash: hashed,
       nickname,
+      role: UserRole.USER,
       ...rest,
     });
 
