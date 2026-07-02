@@ -14,7 +14,7 @@ import { EmailVerificationModule } from '../email/email-verification.module';
     TypeOrmModule.forFeature([User]),
     PassportModule,
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'secretKey',
+      secret: process.env.JWT_SECRET,
       signOptions: { expiresIn: '1d' },
     }),
     EmailVerificationModule,

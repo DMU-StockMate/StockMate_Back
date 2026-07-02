@@ -16,6 +16,7 @@ import { StockPriceDaily } from '../entities/stock-price-daily.entity';
 import { Stock, StockStatus } from '../entities/stock.entity';
 import { StockMarket } from '../../enums/stock-market.enum';
 import { KiwoomWebSocketService } from '../../kiwoom/services/kiwoom-websocket.service';
+import { StockPriceSnapshotService } from './stock-price-snapshot.service';
 
 @Injectable()
 export class StocksService {
@@ -33,6 +34,8 @@ export class StocksService {
     private readonly stockInvestmentIndicatorRepository: Repository<StockInvestmentIndicator>,
 
     private readonly kiwoomWebSocketService: KiwoomWebSocketService,
+
+    private readonly stockPriceSnapshotService: StockPriceSnapshotService,
   ) {}
 
   async findAll(query: StockSearchQueryDto) {
@@ -97,40 +100,33 @@ export class StocksService {
   }
 
   async findCurrentPrice(ticker: string) {
-    const { stock, latestPrice, previousPrice, change } =
-      await this.findLatestAndPreviousDailyPrice(ticker);
-    const realtimePrice = await this.kiwoomWebSocketService.getCurrentPrice(
-      stock.ticker,
-    );
-    const latestClose = this.toNumberOrNull(latestPrice.closePrice);
-    const previousClose = this.toNumberOrNull(previousPrice?.closePrice);
-    const currentPrice = realtimePrice ?? latestClose;
-    const basePrice = realtimePrice !== null ? latestClose : previousClose;
-    const realtimeChange =
-      realtimePrice !== null
-        ? this.calculatePriceChangeByValue(currentPrice, basePrice)
-        : change;
+    const snapshot = await this.resolveCurrentPriceSnapshot(ticker);
 
     return {
-      stockId: stock.stockId,
-      ticker: stock.ticker,
-      companyName: stock.companyName,
-      tradeDate: latestPrice.tradeDate,
-      currentPrice,
-      realtimePrice,
-      previousClosePrice: basePrice,
-      changePrice: realtimeChange.changePrice,
-      changeRate: realtimeChange.changeRate,
-      price: latestPrice,
+      stockId: snapshot.stock.stockId,
+      ticker: snapshot.stock.ticker,
+      companyName: snapshot.stock.companyName,
+      tradeDate: snapshot.latestPrice.tradeDate,
+      currentPrice: snapshot.currentPrice,
+      realtimePrice: snapshot.realtimePrice,
+      previousClosePrice: snapshot.previousClosePrice,
+      changePrice: snapshot.changePrice,
+      changeRate: snapshot.changeRate,
+      price: snapshot.latestPrice,
     };
   }
 
   async findSummary(ticker: string) {
     const stock = await this.findByTicker(ticker);
-    const [latestPrice, previousPrice] = await this.findTwoLatestPricesByStock(
-      stock.stockId,
-    );
-    const change = this.calculatePriceChange(latestPrice, previousPrice);
+    const [latestPrice, previousPrice] =
+      await this.stockPriceSnapshotService.findTwoLatestPricesByStock(
+        stock.stockId,
+      );
+    const change =
+      this.stockPriceSnapshotService.calculatePriceChangeFromPrices(
+        latestPrice,
+        previousPrice,
+      );
 
     return {
       stock,
@@ -220,13 +216,24 @@ export class StocksService {
 
   async findIndicators(ticker: string) {
     const stock = await this.findByTicker(ticker);
-    const [latestPrice, previousPrice] = await this.findTwoLatestPricesByStock(
-      stock.stockId,
+    const [latestPrice, previousPrice] =
+      await this.stockPriceSnapshotService.findTwoLatestPricesByStock(
+        stock.stockId,
+      );
+    const change =
+      this.stockPriceSnapshotService.calculatePriceChangeFromPrices(
+        latestPrice,
+        previousPrice,
+      );
+    const currentPrice = this.stockPriceSnapshotService.toNumberOrNull(
+      latestPrice?.closePrice,
     );
-    const change = this.calculatePriceChange(latestPrice, previousPrice);
-    const currentPrice = this.toNumberOrNull(latestPrice?.closePrice);
-    const marketCap = this.toNumberOrNull(stock.detail?.marketCap);
-    const totalShares = this.toNumberOrNull(stock.detail?.totalShares);
+    const marketCap = this.stockPriceSnapshotService.toNumberOrNull(
+      stock.detail?.marketCap,
+    );
+    const totalShares = this.stockPriceSnapshotService.toNumberOrNull(
+      stock.detail?.totalShares,
+    );
     const marketCapFromPrice =
       currentPrice !== null && totalShares !== null
         ? currentPrice * totalShares
@@ -367,9 +374,10 @@ export class StocksService {
 
   private async findLatestAndPreviousDailyPrice(ticker: string) {
     const stock = await this.findByTicker(ticker);
-    const [latestPrice, previousPrice] = await this.findTwoLatestPricesByStock(
-      stock.stockId,
-    );
+    const [latestPrice, previousPrice] =
+      await this.stockPriceSnapshotService.findTwoLatestPricesByStock(
+        stock.stockId,
+      );
 
     if (!latestPrice) {
       throw new NotFoundException('종목 시세를 찾을 수 없습니다.');
@@ -379,20 +387,12 @@ export class StocksService {
       stock,
       latestPrice,
       previousPrice,
-      change: this.calculatePriceChange(latestPrice, previousPrice),
+      change:
+        this.stockPriceSnapshotService.calculatePriceChangeFromPrices(
+          latestPrice,
+          previousPrice,
+        ),
     };
-  }
-
-  private async findTwoLatestPricesByStock(stockId: number) {
-    return this.stockPriceDailyRepository.find({
-      where: {
-        stockId,
-      },
-      order: {
-        tradeDate: 'DESC',
-      },
-      take: 2,
-    });
   }
 
   private async findLatestInvestmentIndicator(stockId: number) {
@@ -418,74 +418,42 @@ export class StocksService {
     ].some((value) => value !== null && value !== undefined);
   }
 
-  private calculatePriceChange(
-    latestPrice?: StockPriceDaily,
-    previousPrice?: StockPriceDaily,
-  ) {
-    const latestClose = this.toNumberOrNull(latestPrice?.closePrice);
-    const previousClose = this.toNumberOrNull(previousPrice?.closePrice);
-
-    return this.calculatePriceChangeByValue(latestClose, previousClose);
-  }
-
-  private calculatePriceChangeByValue(
-    currentPrice: number | null,
-    previousClose: number | null,
-  ) {
-    if (
-      currentPrice === null ||
-      previousClose === null ||
-      previousClose === 0
-    ) {
-      return {
-        changePrice: null,
-        changeRate: null,
-      };
-    }
-
-    const changePrice = currentPrice - previousClose;
+  async findLatestDailyPrice(ticker: string) {
+    const snapshot = await this.resolveCurrentPriceSnapshot(ticker);
 
     return {
-      changePrice,
-      changeRate: (changePrice / previousClose) * 100,
+      stockId: snapshot.stock.stockId,
+      ticker: snapshot.stock.ticker,
+      companyName: snapshot.stock.companyName,
+      currentPrice: snapshot.currentPrice,
+      realtimePrice: snapshot.realtimePrice,
+      price: snapshot.latestPrice,
+      previousClosePrice: snapshot.previousClosePrice,
+      changePrice: snapshot.changePrice,
+      changeRate: snapshot.changeRate,
     };
   }
 
-  private toNumberOrNull(value?: string | number | null) {
-    if (value === null || value === undefined) {
-      return null;
-    }
-
-    const numberValue = Number(value);
-
-    return Number.isFinite(numberValue) ? numberValue : null;
-  }
-
-  async findLatestDailyPrice(ticker: string) {
-    const { stock, latestPrice, previousPrice, change } =
-      await this.findLatestAndPreviousDailyPrice(ticker);
-    const realtimePrice = await this.kiwoomWebSocketService.getCurrentPrice(
-      stock.ticker,
-    );
-    const latestClose = this.toNumberOrNull(latestPrice.closePrice);
-    const previousClose = this.toNumberOrNull(previousPrice?.closePrice);
-    const currentPrice = realtimePrice ?? latestClose;
-    const basePrice = realtimePrice !== null ? latestClose : previousClose;
-    const realtimeChange =
-      realtimePrice !== null
-        ? this.calculatePriceChangeByValue(currentPrice, basePrice)
-        : change;
+  private async resolveCurrentPriceSnapshot(ticker: string) {
+    const stock = await this.findByTicker(ticker);
+    const snapshot =
+      await this.stockPriceSnapshotService.buildCurrentPriceSnapshot({
+        stockId: stock.stockId,
+        ticker: stock.ticker,
+        requireLatestPrice: true,
+        latestPriceNotFoundMessage:
+          '醫낅ぉ ?쒖꽭瑜?李얠쓣 ???놁뒿?덈떎.',
+      });
 
     return {
-      stockId: stock.stockId,
-      ticker: stock.ticker,
-      companyName: stock.companyName,
-      currentPrice,
-      realtimePrice,
-      price: latestPrice,
-      previousClosePrice: basePrice,
-      changePrice: realtimeChange.changePrice,
-      changeRate: realtimeChange.changeRate,
+      stock,
+      latestPrice: snapshot.latestPrice!,
+      previousPrice: snapshot.previousPrice,
+      currentPrice: snapshot.currentPrice,
+      realtimePrice: snapshot.realtimePrice,
+      previousClosePrice: snapshot.previousClosePrice,
+      changePrice: snapshot.changePrice,
+      changeRate: snapshot.changeRate,
     };
   }
 
@@ -853,9 +821,17 @@ export class StocksService {
   async getCurrentPrice(stockCode: string) {
     const price = await this.kiwoomWebSocketService.getCurrentPrice(stockCode);
     const stock = await this.findByTicker(stockCode);
-    const [latestPrice] = await this.findTwoLatestPricesByStock(stock.stockId);
-    const previousClosePrice = this.toNumberOrNull(latestPrice?.closePrice);
-    const change = this.calculatePriceChangeByValue(price, previousClosePrice);
+    const [latestPrice] =
+      await this.stockPriceSnapshotService.findTwoLatestPricesByStock(
+        stock.stockId,
+      );
+    const previousClosePrice = this.stockPriceSnapshotService.toNumberOrNull(
+      latestPrice?.closePrice,
+    );
+    const change = this.stockPriceSnapshotService.calculatePriceChange(
+      price,
+      previousClosePrice,
+    );
 
     if (price === null) {
       throw new NotFoundException(
