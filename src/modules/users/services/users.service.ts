@@ -10,7 +10,7 @@ import { InjectRedis } from '@nestjs-modules/ioredis';
 import { Redis } from 'ioredis';
 import { Not, Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
-import { EmailVerificationService } from '../../email/service/email-verification.service';
+import { EmailVerificationService } from '../../email/services/email-verification.service';
 
 import * as bcrypt from 'bcryptjs';
 import { CreateUserDto } from '../dto/create-user.dto';

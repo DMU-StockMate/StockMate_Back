@@ -11,7 +11,7 @@ import { QuizChoice } from '../../learning/entities/quiz-choice.entity';
 import { TopicName } from '../../learning/entities/topic-name.entity';
 import { InvestmentLevel } from '../../learning/entities/investment-level.entity';
 
-import { AiLlamaProviderService } from './ai-provide.service';
+import { AiLlamaProviderService } from './ai-provider.service';
 import { GenerateQuestionRequestDto } from '../dto/generate-question-request.dto';
 
 @Injectable()

@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { LearningController } from './controllers/learning.controller';
-import { LearningService } from './service/learning.service';
+import { LearningService } from './services/learning.service';
 
 import { QuizQuestion } from './entities/quiz-question.entity';
 import { QuizChoice } from './entities/quiz-choice.entity';
