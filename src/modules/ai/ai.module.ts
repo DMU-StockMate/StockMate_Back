@@ -1,19 +1,19 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
-import { AiChatController } from '../controllers/ai-chat.controller';
-import { AiChatService } from '../services/ai-chat.service';
-import { AiLlamaProviderService } from '../services/ai-provide.service';
+import { AiChatController } from './controllers/ai-chat.controller';
+import { AiChatService } from './services/ai-chat.service';
+import { AiLlamaProviderService } from './services/ai-provider.service';
 
-import { AiChatSession } from '../entities/ai-chat-session.entity';
-import { AiChatMessage } from '../entities/ai-chat-message.entity';
+import { AiChatSession } from './entities/ai-chat-session.entity';
+import { AiChatMessage } from './entities/ai-chat-message.entity';
 import { User } from 'src/modules/users/entities/user.entity';
 import { QuizQuestion } from 'src/modules/learning/entities/quiz-question.entity';
 import { TopicName } from 'src/modules/learning/entities/topic-name.entity';
 import { InvestmentLevel } from 'src/modules/learning/entities/investment-level.entity';
 import { QuizChoice } from 'src/modules/learning/entities/quiz-choice.entity';
-import { AiQuestionService } from '../services/ai-question.service';
-import { AiQuestionController } from '../controllers/ai-question.controller';
+import { AiQuestionService } from './services/ai-question.service';
+import { AiQuestionController } from './controllers/ai-question.controller';
 
 @Module({
   imports: [
