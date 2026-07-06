@@ -1,5 +1,6 @@
 
 import { Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
@@ -13,9 +14,21 @@ import { EmailVerificationModule } from '../email/email-verification.module';
   imports: [
     TypeOrmModule.forFeature([User]),
     PassportModule,
-    JwtModule.register({
-      secret: process.env.JWT_SECRET,
-      signOptions: { expiresIn: '1d' },
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => {
+        const secret = configService.get<string>('JWT_SECRET');
+
+        if (!secret) {
+          throw new Error('JWT_SECRET is not configured.');
+        }
+
+        return {
+          secret,
+          signOptions: { expiresIn: '1d' },
+        };
+      },
     }),
     EmailVerificationModule,
   ],
