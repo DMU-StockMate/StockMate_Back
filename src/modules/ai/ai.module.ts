@@ -8,6 +8,7 @@ import { AiLlamaProviderService } from './services/ai-provider.service';
 import { AiChatSession } from './entities/ai-chat-session.entity';
 import { AiChatMessage } from './entities/ai-chat-message.entity';
 import { User } from 'src/modules/users/entities/user.entity';
+import { QuizAttempt } from 'src/modules/learning/entities/quiz-attempt.entity';
 import { QuizQuestion } from 'src/modules/learning/entities/quiz-question.entity';
 import { TopicName } from 'src/modules/learning/entities/topic-name.entity';
 import { InvestmentLevel } from 'src/modules/learning/entities/investment-level.entity';
@@ -21,6 +22,7 @@ import { AiQuestionController } from './controllers/ai-question.controller';
       AiChatSession,
       AiChatMessage,
       User,
+      QuizAttempt,
       QuizQuestion,
       QuizChoice,
       TopicName,
