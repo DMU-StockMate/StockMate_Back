@@ -7,6 +7,7 @@ import {
   IsIn,
   IsInt,
   IsOptional,
+  Max,
   Min,
 } from 'class-validator';
 
@@ -58,4 +59,16 @@ export class GenerateQuestionRequestDto {
   @IsOptional()
   @IsIn(['MULTIPLE_CHOICE', 'OX'])
   questionType?: 'MULTIPLE_CHOICE' | 'OX';
+
+  @ApiProperty({
+    example: 1,
+    description: '생성할 문제 개수',
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  count?: number;
 }

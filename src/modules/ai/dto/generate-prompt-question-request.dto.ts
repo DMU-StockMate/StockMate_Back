@@ -5,6 +5,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
   MinLength,
@@ -51,4 +52,16 @@ export class GeneratePromptQuestionRequestDto {
   @IsInt()
   @Min(1)
   investmentLevelId?: number;
+
+  @ApiProperty({
+    example: 1,
+    description: '생성할 문제 개수',
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  count?: number;
 }
