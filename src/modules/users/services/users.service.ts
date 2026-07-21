@@ -10,7 +10,7 @@ import { InjectRedis } from '@nestjs-modules/ioredis';
 import { Redis } from 'ioredis';
 import { Not, Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
-import { EmailVerificationService } from '../../email/service/email-verification.service';
+import { EmailVerificationService } from '../../email/services/email-verification.service';
 
 import * as bcrypt from 'bcryptjs';
 import { CreateUserDto } from '../dto/create-user.dto';
@@ -19,6 +19,7 @@ import { LoginUserDto } from '../dto/login-user.dto';
 import { User } from '../entities/user.entity';
 import { CheckEmailDto } from '../dto/check-email.dto';
 import { CheckNickNameDto } from '../dto/check-nickname.dto';
+import { UserRole } from 'src/modules/enums/role-enum';
 
 @Injectable()
 export class UsersService {
@@ -34,7 +35,7 @@ export class UsersService {
   ) {}
 
   async create(createUserDto: CreateUserDto): Promise<User> {
-    const { email, password, nickname, ...rest } = createUserDto;
+    const { email, password, nickname, role: _role, ...rest } = createUserDto;
 
     await this.emailService.checkEmailVerified(email, 'REGISTER');
     await this.checkEmail({ email });
@@ -45,6 +46,7 @@ export class UsersService {
       email,
       password_hash: hashed,
       nickname,
+      role: UserRole.USER,
       ...rest,
     });
 

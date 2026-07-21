@@ -10,7 +10,7 @@ async function bootstrap() {
   const configuredOrigins = process.env.CORS_ORIGINS?.split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
-  const devOriginPattern = /^http:\/\/(localhost|127\.0\.0\.1):517\d$/;
+  const devOriginPattern = /^http:\/\/(localhost|127\.0\.0\.1):(3000|517\d)$/;
 
   app.enableCors({
     origin: (origin, callback) => {
@@ -61,5 +61,9 @@ async function bootstrap() {
   SwaggerModule.setup('api', app, document);
 
   await app.listen(3000);
+
+  console.log('MAIL_HOST:', process.env.MAIL_HOST);
+console.log('MAIL_USER:', process.env.MAIL_USER);
+console.log('MAIL_PASS exists:', !!process.env.MAIL_PASS);
 }
 bootstrap();

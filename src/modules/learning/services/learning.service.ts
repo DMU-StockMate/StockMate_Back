@@ -12,7 +12,7 @@ import { QuizQuestion } from '../entities/quiz-question.entity';
 import { QuizAttempt } from '../entities/quiz-attempt.entity';
 import { QuizBookmark } from '../entities/quiz-bookmark.entity';
 import { SubmitAnswerDto } from '../dto/submit-answer.dto';
-import { QuestionResponseDto } from '../dto/reponse.dto';
+import { QuestionResponseDto } from '../dto/response.dto';
 
 @Injectable()
 export class LearningService {
