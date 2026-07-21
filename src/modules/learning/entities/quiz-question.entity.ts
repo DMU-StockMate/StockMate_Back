@@ -3,19 +3,46 @@ import {
   PrimaryGeneratedColumn,
   Column,
   OneToMany,
+  JoinColumn,
+  ManyToOne,
 } from 'typeorm';
 import { QuizChoice } from './quiz-choice.entity';
+import { TopicName } from './topic-name.entity';
+import { InvestmentLevel } from './investment-level.entity';
 
 @Entity('quiz_questions')
 export class QuizQuestion {
   @PrimaryGeneratedColumn()
   question_id: number;
 
-  @Column()
-  topic_id: number;
+  @Column({
+    type: 'int',
+    name: 'topic_id',
+    nullable: true,
+  })
+  topic_id: number | null;
 
-  @Column({ nullable: true })
-  investment_level_id: number;
+  @ManyToOne(() => TopicName, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'topic_id' })
+  topicName: TopicName | null;
+
+
+  @Column({
+    type: 'int',
+    name: 'investment_level_id',
+    nullable: true,
+  })
+  investment_level_id: number | null;
+
+  @ManyToOne(() => InvestmentLevel, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'investment_level_id' })
+  investmentLevel: InvestmentLevel | null;
 
   @Column()
   question_type: string;

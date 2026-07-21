@@ -57,7 +57,7 @@ export class UsersController {
   @Get('check-email')
   @ApiOperation({ summary: '이메일 중복 체크' })
   @ApiResponse({ status: 200, description: '사용 가능 여부 반환' })
-  async checkEmail(@Query('email') checkEmailDto: CheckEmailDto) {
+  async checkEmail(@Query() checkEmailDto: CheckEmailDto) {
     return await this.usersService.checkEmail(checkEmailDto);
   }
 

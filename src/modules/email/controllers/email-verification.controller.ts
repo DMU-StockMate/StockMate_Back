@@ -10,7 +10,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 
-import { EmailVerificationService } from '../service/email-verification.service';
+import { EmailVerificationService } from '../services/email-verification.service';
 import { SendEmailCodeDto } from '../dto/send-email-code.dto';
 import { VerifyEmailCodeDto } from '../dto/verify-email-code.dto';
 
