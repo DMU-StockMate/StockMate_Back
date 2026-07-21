@@ -10,7 +10,7 @@ import { AiChatSession } from '../entities/ai-chat-session.entity';
 import { AiChatMessage } from '../entities/ai-chat-message.entity';
 import { User } from '../../users/entities/user.entity';
 import { QuizQuestion } from '../../learning/entities/quiz-question.entity';
-import { AiLlamaProviderService } from './ai-provide.service';
+import { AiLlamaProviderService } from './ai-provider.service';
 
 @Injectable()
 export class AiChatService {
