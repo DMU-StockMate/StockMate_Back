@@ -51,6 +51,18 @@ export class GenerateQuestionRequestDto {
   investmentLevelId?: number;
 
   @ApiProperty({
+    example: 2,
+    description:
+      '퀴즈 카테고리 ID. 없으면 오답 문제의 카테고리를 기반으로 사용합니다.',
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  categoryId?: number;
+
+  @ApiProperty({
     example: 'MULTIPLE_CHOICE',
     enum: ['MULTIPLE_CHOICE', 'OX'],
     description: '생성할 문제 유형',
