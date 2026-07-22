@@ -13,6 +13,9 @@ import { QuizQuestion } from 'src/modules/learning/entities/quiz-question.entity
 import { TopicName } from 'src/modules/learning/entities/topic-name.entity';
 import { InvestmentLevel } from 'src/modules/learning/entities/investment-level.entity';
 import { QuizChoice } from 'src/modules/learning/entities/quiz-choice.entity';
+import { QuizCategory } from 'src/modules/learning/entities/quiz-category.entity';
+import { QuizCategoryDetail } from 'src/modules/learning/entities/quiz-category-detail.entity';
+import { QuizQuestionDetail } from 'src/modules/learning/entities/quiz-question-detail.entity';
 import { AiQuestionService } from './services/ai-question.service';
 import { AiQuestionController } from './controllers/ai-question.controller';
 
@@ -27,6 +30,9 @@ import { AiQuestionController } from './controllers/ai-question.controller';
       QuizChoice,
       TopicName,
       InvestmentLevel,
+      QuizCategory,
+      QuizCategoryDetail,
+      QuizQuestionDetail,
     ]),
   ],
   controllers: [AiChatController,AiQuestionController],

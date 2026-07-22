@@ -11,6 +11,7 @@ import { DartModule } from './modules/dart/dart.module';
 import { StocksModule } from './modules/stocks/stocks.module';
 import { TradingModule } from './modules/trading/trading.module';
 import { WatchlistModule } from './modules/watchlist/watchlist.module';
+import { CommunityModule } from './modules/community/community.module';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { WatchlistModule } from './modules/watchlist/watchlist.module';
     DartModule,
     TradingModule,
     WatchlistModule,
+    CommunityModule,
   ],
 })
 export class AppModule {}
