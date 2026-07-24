@@ -64,6 +64,10 @@ export class CommunityService {
     return this.findPosts(CommunityBoardType.STOCK, query, stock.stockId);
   }
 
+  async findAllStockPosts(query: CommunityPostQueryDto) {
+    return this.findPosts(CommunityBoardType.STOCK, query);
+  }
+
   async createStockPost(
     userId: number,
     ticker: string,
