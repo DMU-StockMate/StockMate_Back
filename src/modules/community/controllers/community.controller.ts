@@ -69,6 +69,12 @@ export class CommunityController {
     return this.communityService.createStockPost(req.user.userId, ticker, dto);
   }
 
+  @Get('community/posts/stock')
+  @ApiOperation({ summary: '전체 종목 게시글 목록 조회 (특정 종목으로 필터링하지 않음)' })
+  findAllStockPosts(@Query() query: CommunityPostQueryDto) {
+    return this.communityService.findAllStockPosts(query);
+  }
+
   @Get('community/posts/:postId')
   @ApiOperation({ summary: '게시글 상세 조회 및 조회수 증가' })
   findPostDetail(@Param('postId', ParseIntPipe) postId: number) {
