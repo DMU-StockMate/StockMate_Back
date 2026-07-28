@@ -6,6 +6,7 @@ import {
   Param,
   ParseIntPipe,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -29,6 +30,7 @@ import { JwtAuthGuard } from 'src/modules/users/guards/jwt-auth.guard';
 import { LearningService } from '../services/learning.service';
 import { SubmitAnswerDto } from '../dto/submit-answer.dto';
 import { QuestionResponseDto } from '../dto/response.dto';
+import { RecommendedQuestionQueryDto } from '../dto/recommended-question-query.dto';
 
 @ApiTags('learning')
 @ApiBearerAuth('accessToken')
@@ -61,6 +63,25 @@ export class LearningController {
   })
   findAllQuestions() {
     return this.learningService.findAllQuestions();
+  }
+
+  @Get('questions/recommended')
+  @ApiOperation({
+    summary: '개인별 맞춤형 추천 문제 조회',
+    description: '사용자 투자 수준, 오답 유형, 최근 학습 이력, 북마크를 기반으로 추천 문제를 조회합니다.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: '추천 문제 조회 성공',
+  })
+  getRecommendedQuestions(
+    @Req() req,
+    @Query() query: RecommendedQuestionQueryDto,
+  ) {
+    return this.learningService.getRecommendedQuestions(
+      req.user.userId,
+      query,
+    );
   }
 
   @Get('questions/:questionId')
