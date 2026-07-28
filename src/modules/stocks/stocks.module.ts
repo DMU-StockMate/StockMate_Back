@@ -7,6 +7,7 @@ import { StockPriceDaily } from './entities/stock-price-daily.entity';
 import { AdminStocksController } from './controllers/admin-stocks.controller';
 import { StocksController } from './controllers/stocks.controller';
 import { StocksService } from './services/stocks.service';
+import { StockPriceSnapshotService } from './services/stock-price-snapshot.service';
 import { KiwoomAuthService } from '../kiwoom/services/kiwoom-auth.service';
 import { KiwoomWebSocketService } from '../kiwoom/services/kiwoom-websocket.service';
 
@@ -20,10 +21,16 @@ import { KiwoomWebSocketService } from '../kiwoom/services/kiwoom-websocket.serv
     ]),
   ],
   controllers: [StocksController, AdminStocksController],
-  providers: [StocksService, KiwoomWebSocketService, KiwoomAuthService],
+  providers: [
+    StocksService,
+    StockPriceSnapshotService,
+    KiwoomWebSocketService,
+    KiwoomAuthService,
+  ],
   exports: [
     TypeOrmModule,
     StocksService,
+    StockPriceSnapshotService,
     KiwoomWebSocketService,
     KiwoomAuthService,
   ],

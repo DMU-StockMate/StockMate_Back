@@ -34,6 +34,7 @@ export class AdminController {
 
   // 전체 조회
   @Get()
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: '전체 사용자 조회 (관리자)' })
   @ApiResponse({ status: 200, description: '사용자 목록 반환 성공' })
@@ -44,6 +45,7 @@ export class AdminController {
 
   // 단일 조회
   @Get(':userId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: '특정 사용자 조회 (관리자)' })
   @ApiParam({ name: 'userId', type: Number, description: '조회할 사용자 ID' })
@@ -56,6 +58,7 @@ export class AdminController {
 
   // 권한 변경
   @Patch(':userId/role')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: '사용자 권한 변경 (관리자)' })
   @ApiParam({ name: 'userId', type: Number, description: '대상 사용자 ID' })
@@ -72,6 +75,7 @@ export class AdminController {
 
   // 상태 변경
   @Patch(':userId/status')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: '사용자 상태 변경 (정지/탈퇴 등)' })
   @ApiParam({ name: 'userId', type: Number, description: '대상 사용자 ID' })
