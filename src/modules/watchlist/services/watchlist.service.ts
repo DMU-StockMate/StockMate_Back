@@ -6,8 +6,8 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { KiwoomWebSocketService } from '../../kiwoom/services/kiwoom-websocket.service';
-import { StockPriceDaily } from '../../stocks/entities/stock-price-daily.entity';
 import { Stock, StockStatus } from '../../stocks/entities/stock.entity';
+import { StockPriceSnapshotService } from '../../stocks/services/stock-price-snapshot.service';
 import { CreateWatchlistDto } from '../dto/create-watchlist.dto';
 import { Watchlist } from '../entities/watchlist.entity';
 
@@ -20,10 +20,9 @@ export class WatchlistService {
     @InjectRepository(Stock)
     private readonly stockRepository: Repository<Stock>,
 
-    @InjectRepository(StockPriceDaily)
-    private readonly stockPriceDailyRepository: Repository<StockPriceDaily>,
-
     private readonly kiwoomWebSocketService: KiwoomWebSocketService,
+
+    private readonly stockPriceSnapshotService: StockPriceSnapshotService,
   ) {}
 
   async create(userId: number, dto: CreateWatchlistDto) {
@@ -135,11 +134,17 @@ export class WatchlistService {
     const watchlist = await this.findOwnedWatchlist(userId, watchlistId);
     const stockCode = watchlist.stock.ticker;
     const price = await this.kiwoomWebSocketService.getCurrentPrice(stockCode);
-    const [latestPrice] = await this.findTwoLatestPricesByStock(
-      watchlist.stockId,
+    const [latestPrice] =
+      await this.stockPriceSnapshotService.findTwoLatestPricesByStock(
+        watchlist.stockId,
+      );
+    const previousClosePrice = this.stockPriceSnapshotService.toNumberOrNull(
+      latestPrice?.closePrice,
     );
-    const previousClosePrice = this.toNumberOrNull(latestPrice?.closePrice);
-    const change = this.calculatePriceChange(price, previousClosePrice);
+    const change = this.stockPriceSnapshotService.calculatePriceChange(
+      price,
+      previousClosePrice,
+    );
 
     if (price === null) {
       throw new NotFoundException(
@@ -195,16 +200,11 @@ export class WatchlistService {
 
   private async toResponse(watchlist: Watchlist) {
     const stockCode = watchlist.stock.ticker;
-    const [latestPrice, previousPrice] = await this.findTwoLatestPricesByStock(
-      watchlist.stockId,
-    );
-    const realtimePrice =
-      await this.kiwoomWebSocketService.getCurrentPrice(stockCode);
-    const latestClose = this.toNumberOrNull(latestPrice?.closePrice);
-    const previousClose = this.toNumberOrNull(previousPrice?.closePrice);
-    const currentPrice = realtimePrice ?? latestClose;
-    const basePrice = realtimePrice !== null ? latestClose : previousClose;
-    const change = this.calculatePriceChange(currentPrice, basePrice);
+    const snapshot =
+      await this.stockPriceSnapshotService.buildCurrentPriceSnapshot({
+        stockId: watchlist.stockId,
+        ticker: stockCode,
+      });
 
     return {
       watchlistId: watchlist.watchlistId,
@@ -217,59 +217,14 @@ export class WatchlistService {
       sector: watchlist.stock.sector,
       currency: watchlist.stock.currency,
       status: watchlist.stock.status,
-      currentPrice,
-      realtimePrice,
-      previousClosePrice: basePrice,
-      changePrice: change.changePrice,
-      changeRate: change.changeRate,
+      currentPrice: snapshot.currentPrice,
+      realtimePrice: snapshot.realtimePrice,
+      previousClosePrice: snapshot.previousClosePrice,
+      changePrice: snapshot.changePrice,
+      changeRate: snapshot.changeRate,
       isRealtimeSubscribed:
         this.kiwoomWebSocketService.isSubscribedStock(stockCode),
       createdAt: watchlist.createdAt,
     };
-  }
-
-  private async findTwoLatestPricesByStock(stockId: number) {
-    return this.stockPriceDailyRepository.find({
-      where: {
-        stockId,
-      },
-      order: {
-        tradeDate: 'DESC',
-      },
-      take: 2,
-    });
-  }
-
-  private calculatePriceChange(
-    currentPrice: number | null,
-    previousClosePrice: number | null,
-  ) {
-    if (
-      currentPrice === null ||
-      previousClosePrice === null ||
-      previousClosePrice === 0
-    ) {
-      return {
-        changePrice: null,
-        changeRate: null,
-      };
-    }
-
-    const changePrice = currentPrice - previousClosePrice;
-
-    return {
-      changePrice,
-      changeRate: (changePrice / previousClosePrice) * 100,
-    };
-  }
-
-  private toNumberOrNull(value?: string | number | null) {
-    if (value === null || value === undefined) {
-      return null;
-    }
-
-    const numberValue = Number(value);
-
-    return Number.isFinite(numberValue) ? numberValue : null;
   }
 }

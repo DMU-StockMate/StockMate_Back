@@ -66,6 +66,7 @@ export class EmailVerificationService {
           '이미 사용 중인 이메일입니다.',
         );
       }
+      
     }
 
     // 비밀번호 재설정
@@ -82,6 +83,7 @@ export class EmailVerificationService {
     }
 
     const code = this.generateEmailCode();
+    console.log(code);
 
     const key = this.getEmailCodeKey(
       email,
@@ -103,6 +105,8 @@ export class EmailVerificationService {
         purpose,
       );
     } catch (error) {
+      console.error('이메일 발송 실패 원본 에러:', error);
+
       await this.redis.del(key);
 
       throw new InternalServerErrorException(
