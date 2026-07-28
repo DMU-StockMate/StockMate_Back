@@ -13,6 +13,20 @@ import { QuizAttempt } from '../entities/quiz-attempt.entity';
 import { QuizBookmark } from '../entities/quiz-bookmark.entity';
 import { SubmitAnswerDto } from '../dto/submit-answer.dto';
 import { QuestionResponseDto } from '../dto/response.dto';
+import { RecommendedQuestionQueryDto } from '../dto/recommended-question-query.dto';
+import { User } from '../../users/entities/user.entity';
+
+type RecommendationMode = 'mixed' | 'weakness' | 'level' | 'review';
+
+type RecommendationReasonType =
+  | 'WEAK_DETAIL'
+  | 'WEAK_CATEGORY'
+  | 'WEAK_TOPIC'
+  | 'RECENT_LEARNING'
+  | 'BOOKMARK_RELATED'
+  | 'LEVEL_MATCH'
+  | 'COMMON_LEVEL'
+  | 'REVIEW';
 
 @Injectable()
 export class LearningService {
@@ -26,6 +40,9 @@ export class LearningService {
     @InjectRepository(QuizBookmark)
     private readonly bookmarkRepository: Repository<QuizBookmark>,
 
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+
   ) {}
 
   async findAllQuestions() {
@@ -38,6 +55,158 @@ export class LearningService {
         question_id: 'DESC',
       },
     });
+  }
+
+  async getRecommendedQuestions(
+    userId: number,
+    query: RecommendedQuestionQueryDto,
+  ) {
+    const count = query.count ?? 10;
+    const mode = query.mode ?? 'mixed';
+    const excludeSolved = query.excludeSolved ?? true;
+    const includeReview = query.includeReview ?? true;
+    const user = await this.userRepository.findOne({
+      where: { user_id: userId },
+      relations: ['investmentLevel'],
+    });
+
+    if (!user) {
+      throw new NotFoundException('사용자를 찾을 수 없습니다.');
+    }
+
+    const [attempts, bookmarks, questions] = await Promise.all([
+      this.attemptRepository.find({
+        where: { user_id: userId },
+        relations: [
+          'question',
+          'question.topicName',
+          'question.category',
+          'question.questionDetails',
+          'question.questionDetails.detail',
+        ],
+        order: { solved_at: 'DESC' },
+      }),
+      this.bookmarkRepository.find({
+        where: { user_id: userId },
+        relations: [
+          'question',
+          'question.topicName',
+          'question.category',
+          'question.questionDetails',
+          'question.questionDetails.detail',
+        ],
+        order: { created_at: 'DESC' },
+      }),
+      this.questionRepository.find({
+        where: { status: 'ACTIVE' },
+        relations: [
+          'topicName',
+          'category',
+          'questionDetails',
+          'questionDetails.detail',
+        ],
+      }),
+    ]);
+
+    const attemptByQuestionId = new Map(
+      attempts.map((attempt) => [attempt.question_id, attempt]),
+    );
+    const bookmarkQuestionIds = new Set(
+      bookmarks.map((bookmark) => bookmark.question_id),
+    );
+    const wrongAttempts = attempts.filter(
+      (attempt) => attempt.is_correct === false,
+    );
+    const recentAttempts = attempts.slice(0, 5);
+    const weakTopics = this.countTopics(wrongAttempts);
+    const weakCategories = this.countCategories(wrongAttempts);
+    const weakDetails = this.countDetailsFromAttempts(wrongAttempts);
+    const recentSignals = this.buildAttemptSignals(recentAttempts);
+    const bookmarkSignals = this.buildBookmarkSignals(bookmarks);
+    const scoringContext = {
+      userLevelId: user.investment_level_id,
+      mode,
+      attemptByQuestionId,
+      bookmarkQuestionIds,
+      weakTopicIds: new Set(weakTopics.map((topic) => topic.topicId)),
+      weakCategoryIds: new Set(
+        weakCategories.map((category) => category.categoryId),
+      ),
+      weakDetailIds: new Set(weakDetails.map((detail) => detail.detailId)),
+      recentTopicIds: recentSignals.topicIds,
+      recentCategoryIds: recentSignals.categoryIds,
+      recentDetailIds: recentSignals.detailIds,
+      bookmarkCategoryIds: bookmarkSignals.categoryIds,
+      bookmarkDetailIds: bookmarkSignals.detailIds,
+    };
+
+    const unsolvedCandidates = questions.filter(
+      (question) => !attemptByQuestionId.has(question.question_id),
+    );
+    const baseCandidates =
+      mode === 'review'
+        ? questions.filter((question) => {
+            const attempt = attemptByQuestionId.get(question.question_id);
+            return attempt?.is_correct === false;
+          })
+        : excludeSolved
+          ? unsolvedCandidates
+          : questions;
+
+    const selected = this.rankQuestions(baseCandidates, scoringContext).slice(
+      0,
+      count,
+    );
+
+    if (selected.length < count && includeReview && mode !== 'review') {
+      const selectedIds = new Set(
+        selected.map((item) => item.question.question_id),
+      );
+      const reviewCandidates = questions.filter((question) => {
+        const attempt = attemptByQuestionId.get(question.question_id);
+        return attempt?.is_correct === false && !selectedIds.has(question.question_id);
+      });
+
+      selected.push(
+        ...this.rankQuestions(reviewCandidates, scoringContext).slice(
+          0,
+          count - selected.length,
+        ),
+      );
+    }
+
+    return {
+      strategy: this.toStrategy(mode),
+      userLevel: user.investmentLevel
+        ? {
+            investmentLevelId: user.investmentLevel.investmentLevelId,
+            levelName: user.investmentLevel.levelName,
+          }
+        : null,
+      summary: {
+        solvedCount: attempts.length,
+        wrongCount: wrongAttempts.length,
+        weakTopics,
+        weakCategories,
+        weakDetails,
+      },
+      questions: selected.map((item) =>
+        this.toRecommendedQuestionResponse(
+          item.question,
+          item.reason,
+          item.reasonType,
+          attemptByQuestionId,
+          bookmarkQuestionIds,
+        ),
+      ),
+      aiSuggestion: {
+        needed: selected.length < count,
+        reason:
+          selected.length < count
+            ? '추천 가능한 기존 문제가 부족합니다. AI 보충 문제 생성을 검토할 수 있습니다.'
+            : null,
+      },
+    };
   }
 
  async findQuestionById(
@@ -255,6 +424,349 @@ export class LearningService {
       questionId,
     };
   }
+
+  private rankQuestions(
+    questions: QuizQuestion[],
+    context: {
+      userLevelId: number | null;
+      mode: RecommendationMode;
+      attemptByQuestionId: Map<number, QuizAttempt>;
+      bookmarkQuestionIds: Set<number>;
+      weakTopicIds: Set<number>;
+      weakCategoryIds: Set<number>;
+      weakDetailIds: Set<number>;
+      recentTopicIds: Set<number>;
+      recentCategoryIds: Set<number>;
+      recentDetailIds: Set<number>;
+      bookmarkCategoryIds: Set<number>;
+      bookmarkDetailIds: Set<number>;
+    },
+  ) {
+    return questions
+      .map((question) => ({
+        question,
+        ...this.scoreQuestion(question, context),
+      }))
+      .sort((a, b) => {
+        if (b.score !== a.score) {
+          return b.score - a.score;
+        }
+
+        return b.question.question_id - a.question.question_id;
+      });
+  }
+
+  private scoreQuestion(
+    question: QuizQuestion,
+    context: {
+      userLevelId: number | null;
+      mode: RecommendationMode;
+      attemptByQuestionId: Map<number, QuizAttempt>;
+      bookmarkQuestionIds: Set<number>;
+      weakTopicIds: Set<number>;
+      weakCategoryIds: Set<number>;
+      weakDetailIds: Set<number>;
+      recentTopicIds: Set<number>;
+      recentCategoryIds: Set<number>;
+      recentDetailIds: Set<number>;
+      bookmarkCategoryIds: Set<number>;
+      bookmarkDetailIds: Set<number>;
+    },
+  ): {
+    score: number;
+    reason: string;
+    reasonType: RecommendationReasonType;
+  } {
+    let score = 0;
+    let reasonType: RecommendationReasonType = 'LEVEL_MATCH';
+    let reason = '사용자 투자 수준에 맞는 문제입니다.';
+    const attempt = context.attemptByQuestionId.get(question.question_id);
+    const questionDetailIds = this.getQuestionDetailIds(question);
+    const hasWeakDetail = questionDetailIds.some((detailId) =>
+      context.weakDetailIds.has(detailId),
+    );
+    const hasRecentDetail = questionDetailIds.some((detailId) =>
+      context.recentDetailIds.has(detailId),
+    );
+    const hasBookmarkDetail = questionDetailIds.some((detailId) =>
+      context.bookmarkDetailIds.has(detailId),
+    );
+
+    if (
+      context.userLevelId !== null &&
+      question.investment_level_id === context.userLevelId
+    ) {
+      score += context.mode === 'level' ? 50 : 30;
+      reasonType = 'LEVEL_MATCH';
+      reason = '사용자 투자 수준과 일치하는 문제입니다.';
+    } else if (question.investment_level_id === null) {
+      score += 5;
+      reasonType = 'COMMON_LEVEL';
+      reason = '공통 학습 문제입니다.';
+    }
+
+    if (hasWeakDetail) {
+      score += context.mode === 'weakness' ? 70 : 50;
+      reasonType = 'WEAK_DETAIL';
+      reason = '틀린 문제가 많은 세부 개념과 관련된 문제입니다.';
+    } else if (
+      question.category_id !== null &&
+      context.weakCategoryIds.has(question.category_id)
+    ) {
+      score += context.mode === 'weakness' ? 50 : 35;
+      reasonType = 'WEAK_CATEGORY';
+      reason = '틀린 문제가 많은 카테고리와 관련된 문제입니다.';
+    } else if (context.weakTopicIds.has(question.topic_id)) {
+      score += context.mode === 'weakness' ? 35 : 25;
+      reasonType = 'WEAK_TOPIC';
+      reason = '틀린 문제가 많은 주제와 관련된 문제입니다.';
+    }
+
+    if (
+      hasRecentDetail ||
+      (question.category_id !== null &&
+        context.recentCategoryIds.has(question.category_id)) ||
+      context.recentTopicIds.has(question.topic_id)
+    ) {
+      score += 15;
+
+      if (!['WEAK_DETAIL', 'WEAK_CATEGORY', 'WEAK_TOPIC'].includes(reasonType)) {
+        reasonType = 'RECENT_LEARNING';
+        reason = '최근 학습한 주제와 이어지는 문제입니다.';
+      }
+    }
+
+    if (
+      hasBookmarkDetail ||
+      (question.category_id !== null &&
+        context.bookmarkCategoryIds.has(question.category_id))
+    ) {
+      score += 10;
+
+      if (
+        ![
+          'WEAK_DETAIL',
+          'WEAK_CATEGORY',
+          'WEAK_TOPIC',
+          'RECENT_LEARNING',
+        ].includes(reasonType)
+      ) {
+        reasonType = 'BOOKMARK_RELATED';
+        reason = '북마크한 문제와 관련된 개념의 문제입니다.';
+      }
+    }
+
+    if (!attempt) {
+      score += 20;
+    } else if (attempt.is_correct === true) {
+      score -= 30;
+    } else if (attempt.is_correct === false) {
+      score += context.mode === 'review' ? 60 : 0;
+
+      if (context.mode === 'review') {
+        reasonType = 'REVIEW';
+        reason = '이전에 틀린 문제를 복습하기 위한 추천입니다.';
+      }
+    }
+
+    if (attempt && this.isRecentAttempt(attempt)) {
+      score -= 20;
+    }
+
+    return {
+      score,
+      reason,
+      reasonType,
+    };
+  }
+
+  private toRecommendedQuestionResponse(
+    question: QuizQuestion,
+    recommendReason: string,
+    recommendReasonType: RecommendationReasonType,
+    attemptByQuestionId: Map<number, QuizAttempt>,
+    bookmarkQuestionIds: Set<number>,
+  ) {
+    const attempt = attemptByQuestionId.get(question.question_id);
+
+    return {
+      questionId: question.question_id,
+      questionText: question.question_text,
+      questionType: question.question_type,
+      topic: question.topicName
+        ? {
+            topicId: question.topicName.topicId,
+            topicName: question.topicName.topicName,
+          }
+        : null,
+      category: question.category
+        ? {
+            categoryId: question.category.categoryId,
+            categoryName: question.category.categoryName,
+          }
+        : null,
+      details: (question.questionDetails ?? [])
+        .filter((questionDetail) => questionDetail.detail)
+        .map((questionDetail) => ({
+          detailId: questionDetail.detail.detailId,
+          detailName: questionDetail.detail.detailName,
+        })),
+      recommendReason,
+      recommendReasonType,
+      alreadySolved: Boolean(attempt),
+      lastSolvedAt: attempt?.solved_at ?? null,
+      lastCorrect: attempt?.is_correct ?? null,
+      bookmarked: bookmarkQuestionIds.has(question.question_id),
+    };
+  }
+
+  private countTopics(attempts: QuizAttempt[]) {
+    const map = new Map<number, { topicId: number; topicName: string; wrongCount: number }>();
+
+    attempts.forEach((attempt) => {
+      const topic = attempt.question?.topicName;
+
+      if (!topic) {
+        return;
+      }
+
+      const current = map.get(topic.topicId) ?? {
+        topicId: topic.topicId,
+        topicName: topic.topicName,
+        wrongCount: 0,
+      };
+      current.wrongCount += 1;
+      map.set(topic.topicId, current);
+    });
+
+    return [...map.values()].sort((a, b) => b.wrongCount - a.wrongCount);
+  }
+
+  private countCategories(attempts: QuizAttempt[]) {
+    const map = new Map<
+      number,
+      { categoryId: number; categoryName: string; wrongCount: number }
+    >();
+
+    attempts.forEach((attempt) => {
+      const category = attempt.question?.category;
+
+      if (!category) {
+        return;
+      }
+
+      const current = map.get(category.categoryId) ?? {
+        categoryId: category.categoryId,
+        categoryName: category.categoryName,
+        wrongCount: 0,
+      };
+      current.wrongCount += 1;
+      map.set(category.categoryId, current);
+    });
+
+    return [...map.values()].sort((a, b) => b.wrongCount - a.wrongCount);
+  }
+
+  private countDetailsFromAttempts(attempts: QuizAttempt[]) {
+    const map = new Map<
+      number,
+      { detailId: number; detailName: string; wrongCount: number }
+    >();
+
+    attempts.forEach((attempt) => {
+      (attempt.question?.questionDetails ?? []).forEach((questionDetail) => {
+        const detail = questionDetail.detail;
+
+        if (!detail) {
+          return;
+        }
+
+        const current = map.get(detail.detailId) ?? {
+          detailId: detail.detailId,
+          detailName: detail.detailName,
+          wrongCount: 0,
+        };
+        current.wrongCount += 1;
+        map.set(detail.detailId, current);
+      });
+    });
+
+    return [...map.values()].sort((a, b) => b.wrongCount - a.wrongCount);
+  }
+
+  private buildAttemptSignals(attempts: QuizAttempt[]) {
+    const topicIds = new Set<number>();
+    const categoryIds = new Set<number>();
+    const detailIds = new Set<number>();
+
+    attempts.forEach((attempt) => {
+      if (attempt.question?.topic_id) {
+        topicIds.add(attempt.question.topic_id);
+      }
+
+      if (attempt.question?.category_id) {
+        categoryIds.add(attempt.question.category_id);
+      }
+
+      this.getQuestionDetailIds(attempt.question).forEach((detailId) =>
+        detailIds.add(detailId),
+      );
+    });
+
+    return {
+      topicIds,
+      categoryIds,
+      detailIds,
+    };
+  }
+
+  private buildBookmarkSignals(bookmarks: QuizBookmark[]) {
+    const categoryIds = new Set<number>();
+    const detailIds = new Set<number>();
+
+    bookmarks.forEach((bookmark) => {
+      if (bookmark.question?.category_id) {
+        categoryIds.add(bookmark.question.category_id);
+      }
+
+      this.getQuestionDetailIds(bookmark.question).forEach((detailId) =>
+        detailIds.add(detailId),
+      );
+    });
+
+    return {
+      categoryIds,
+      detailIds,
+    };
+  }
+
+  private getQuestionDetailIds(question?: QuizQuestion) {
+    return (question?.questionDetails ?? [])
+      .map((questionDetail) => questionDetail.detailId)
+      .filter((detailId): detailId is number => Boolean(detailId));
+  }
+
+  private isRecentAttempt(attempt: QuizAttempt) {
+    const sevenDays = 7 * 24 * 60 * 60 * 1000;
+    return Date.now() - new Date(attempt.solved_at).getTime() <= sevenDays;
+  }
+
+  private toStrategy(mode: RecommendationMode) {
+    if (mode === 'weakness') {
+      return 'WEAKNESS_FIRST';
+    }
+
+    if (mode === 'level') {
+      return 'LEVEL_BASED';
+    }
+
+    if (mode === 'review') {
+      return 'REVIEW';
+    }
+
+    return 'MIXED';
+  }
+
   private async findQuestionEntityById(
     questionId: number,
   ): Promise<QuizQuestion> {
