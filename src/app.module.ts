@@ -61,8 +61,6 @@ import { WatchlistModule } from './modules/watchlist/watchlist.module';
     CommunityModule,
     NewsModule,
     NotificationModule,
-    TradingModule,
-    WatchlistModule,
   ],
 })
 export class AppModule {}
