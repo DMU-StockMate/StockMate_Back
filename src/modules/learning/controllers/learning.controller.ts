@@ -6,6 +6,7 @@ import {
   Param,
   ParseIntPipe,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -29,6 +30,8 @@ import { JwtAuthGuard } from 'src/modules/users/guards/jwt-auth.guard';
 import { LearningService } from '../services/learning.service';
 import { SubmitAnswerDto } from '../dto/submit-answer.dto';
 import { QuestionResponseDto } from '../dto/response.dto';
+import { FindQuestionsQueryDto } from '../dto/find-questions-query.dto';
+import { TopicResponseDto } from '../dto/topic-response.dto';
 
 @ApiTags('learning')
 @ApiBearerAuth('accessToken')
@@ -37,14 +40,15 @@ import { QuestionResponseDto } from '../dto/response.dto';
 export class LearningController {
   constructor(private readonly learningService: LearningService) {}
 
-  @Get('questions')
+  @Get('topics')
   @ApiOperation({
-    summary: '문제 목록 조회',
-    description: '활성화된 투자 학습 문제 목록을 조회합니다.',
+    summary: '학습 카테고리 목록 조회',
+    description: '전체 학습 카테고리(주제) 목록을 조회합니다.',
   })
   @ApiResponse({
     status: 200,
-    description: '문제 목록 조회 성공',
+    description: '카테고리 목록 조회 성공',
+    type: [TopicResponseDto],
   })
   @ApiUnauthorizedResponse({
     description: `
@@ -59,8 +63,40 @@ export class LearningController {
 - 서버 내부 오류
     `,
   })
-  findAllQuestions() {
-    return this.learningService.findAllQuestions();
+  findAllTopics(): Promise<TopicResponseDto[]> {
+    return this.learningService.findAllTopics();
+  }
+
+  @Get('questions')
+  @ApiOperation({
+    summary: '문제 목록 조회',
+    description: '활성화된 투자 학습 문제 목록을 조회합니다. topicId, investmentLevelId로 필터링할 수 있습니다.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: '문제 목록 조회 성공',
+  })
+  @ApiBadRequestResponse({
+    description: `
+- topicId가 정수가 아닙니다.
+- investmentLevelId가 정수가 아닙니다.
+    `,
+  })
+  @ApiUnauthorizedResponse({
+    description: `
+- accessToken 없음
+- accessToken 만료
+- 잘못된 토큰
+    `,
+  })
+  @ApiInternalServerErrorResponse({
+    description: `
+- DB 조회 실패
+- 서버 내부 오류
+    `,
+  })
+  findAllQuestions(@Query() query: FindQuestionsQueryDto) {
+    return this.learningService.findAllQuestions(query);
   }
 
   @Get('questions/:questionId')

@@ -608,12 +608,13 @@ export class StocksService {
       );
     }
 
+    const queryOrder = order === 'ASC' && query.limit ? 'DESC' : order;
     const queryBuilder = this.stockPriceDailyRepository
       .createQueryBuilder('price')
       .where('price.stockId = :stockId', {
         stockId,
       })
-      .orderBy('price.tradeDate', order);
+      .orderBy('price.tradeDate', queryOrder);
 
     if (query.startDate) {
       queryBuilder.andWhere('price.tradeDate >= :startDate', {
@@ -631,7 +632,9 @@ export class StocksService {
       queryBuilder.take(query.limit);
     }
 
-    return queryBuilder.getMany();
+    const prices = await queryBuilder.getMany();
+
+    return queryOrder === order ? prices : prices.reverse();
   }
 
   private aggregatePrices(
