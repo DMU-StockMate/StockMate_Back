@@ -6,13 +6,16 @@ import {
 } from '@nestjs/common';
 
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { FindOptionsWhere, Repository } from 'typeorm';
 
 import { QuizQuestion } from '../entities/quiz-question.entity';
 import { QuizAttempt } from '../entities/quiz-attempt.entity';
 import { QuizBookmark } from '../entities/quiz-bookmark.entity';
+import { TopicName } from '../entities/topic-name.entity';
 import { SubmitAnswerDto } from '../dto/submit-answer.dto';
 import { QuestionResponseDto } from '../dto/response.dto';
+import { FindQuestionsQueryDto } from '../dto/find-questions-query.dto';
+import { TopicResponseDto } from '../dto/topic-response.dto';
 
 @Injectable()
 export class LearningService {
@@ -26,13 +29,38 @@ export class LearningService {
     @InjectRepository(QuizBookmark)
     private readonly bookmarkRepository: Repository<QuizBookmark>,
 
+    @InjectRepository(TopicName)
+    private readonly topicRepository: Repository<TopicName>,
+
   ) {}
 
-  async findAllQuestions() {
+  async findAllTopics(): Promise<TopicResponseDto[]> {
+    const topics = await this.topicRepository.find({
+      order: { topicId: 'ASC' },
+    });
+
+    return topics.map((topic) => ({
+      topicId: topic.topicId,
+      topicName: topic.topicName,
+      description: topic.description,
+    }));
+  }
+
+  async findAllQuestions(query: FindQuestionsQueryDto) {
+    const where: FindOptionsWhere<QuizQuestion> = {
+      status: 'ACTIVE',
+    };
+
+    if (query.topicId) {
+      where.topic_id = query.topicId;
+    }
+
+    if (query.investmentLevelId) {
+      where.investment_level_id = query.investmentLevelId;
+    }
+
     return this.questionRepository.find({
-      where: {
-        status: 'ACTIVE',
-      },
+      where,
       relations: ['choices'],
       order: {
         question_id: 'DESC',

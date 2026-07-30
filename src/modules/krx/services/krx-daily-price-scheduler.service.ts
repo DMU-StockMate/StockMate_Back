@@ -19,6 +19,7 @@ export class KrxDailyPriceSchedulerService
   constructor(private readonly krxService: KrxService) {}
 
   onModuleInit() {
+    void this.syncDailyPrices();
     this.scheduleNextMidnightSync();
   }
 
