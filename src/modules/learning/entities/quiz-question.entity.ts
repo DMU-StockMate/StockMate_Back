@@ -5,11 +5,17 @@ import {
   OneToMany,
   JoinColumn,
   ManyToOne,
+  CreateDateColumn,
+  UpdateDateColumn,
 } from 'typeorm';
 import { QuizChoice } from './quiz-choice.entity';
 import { TopicName } from './topic-name.entity';
 import { InvestmentLevel } from './investment-level.entity';
 import { QuizCategory } from './quiz-category.entity';
+<<<<<<< HEAD
+=======
+import { QuizQuestionDetail } from './quiz-question-detail.entity';
+>>>>>>> community/function
 
 @Entity('quiz_questions')
 export class QuizQuestion {
@@ -19,16 +25,14 @@ export class QuizQuestion {
   @Column({
     type: 'int',
     name: 'topic_id',
-    nullable: true,
   })
-  topic_id: number | null;
+  topic_id: number;
 
   @ManyToOne(() => TopicName, {
-    nullable: true,
-    onDelete: 'SET NULL',
+    onDelete: 'CASCADE',
   })
   @JoinColumn({ name: 'topic_id' })
-  topicName: TopicName | null;
+  topicName: TopicName;
 
 
   @Column({
@@ -74,6 +78,21 @@ export class QuizQuestion {
   @Column()
   status: string;
 
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt: Date;
+
+  @UpdateDateColumn({ name: 'updated_at' })
+  updatedAt: Date;
+
   @OneToMany(() => QuizChoice, choice => choice.question)
   choices: QuizChoice[];
+<<<<<<< HEAD
+=======
+
+  @OneToMany(
+    () => QuizQuestionDetail,
+    (questionDetail) => questionDetail.question,
+  )
+  questionDetails: QuizQuestionDetail[];
+>>>>>>> community/function
 }

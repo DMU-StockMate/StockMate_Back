@@ -54,6 +54,17 @@ export class GeneratePromptQuestionRequestDto {
   investmentLevelId?: number;
 
   @ApiProperty({
+    example: 2,
+    description: '저장 및 프롬프트 보강에 사용할 퀴즈 카테고리 ID',
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  categoryId?: number;
+
+  @ApiProperty({
     example: 1,
     description: '생성할 문제 개수',
     required: false,
