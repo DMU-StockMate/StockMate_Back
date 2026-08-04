@@ -70,7 +70,7 @@ export class LearningController {
   @Get('questions')
   @ApiOperation({
     summary: '문제 목록 조회',
-    description: '활성화된 투자 학습 문제 목록을 조회합니다. topicId, investmentLevelId로 필터링할 수 있습니다.',
+    description: '활성화된 투자 학습 문제 목록을 조회합니다. categoryId, investmentLevelId로 필터링할 수 있습니다.',
   })
   @ApiResponse({
     status: 200,
@@ -79,6 +79,7 @@ export class LearningController {
   @ApiBadRequestResponse({
     description: `
 - topicId가 정수가 아닙니다.
+- categoryId가 정수가 아닙니다.
 - investmentLevelId가 정수가 아닙니다.
     `,
   })

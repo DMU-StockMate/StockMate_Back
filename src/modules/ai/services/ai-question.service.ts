@@ -14,6 +14,7 @@ import { TopicName } from '../../learning/entities/topic-name.entity';
 import { GeneratePromptQuestionRequestDto } from '../dto/generate-prompt-question-request.dto';
 import { GenerateQuestionRequestDto } from '../dto/generate-question-request.dto';
 import { AiLlamaProviderService } from './ai-provider.service';
+import { getRewardCashForLevel } from '../../learning/constants/reward-tier';
 
 type QuestionType = 'MULTIPLE_CHOICE' | 'OX';
 
@@ -250,7 +251,9 @@ export class AiQuestionService {
       question_type: generated.question_type,
       question_text: generated.question_text,
       explanation: generated.explanation,
-      reward_cash: generated.reward_cash ?? 1000,
+      reward_cash:
+        generated.reward_cash ??
+        getRewardCashForLevel(metadata.investmentLevel?.investmentLevelId),
       status: 'ACTIVE',
     });
     const question = await this.questionRepository.save(questionEntity);
@@ -283,7 +286,9 @@ export class AiQuestionService {
     };
   }
 
-  private validateGeneratedQuestionBatch(generatedBatch: GeneratedQuestionBatch) {
+  private validateGeneratedQuestionBatch(
+    generatedBatch: GeneratedQuestionBatch,
+  ) {
     if (!generatedBatch || !Array.isArray(generatedBatch.questions)) {
       throw new BadRequestException(
         'AI 문제 생성 응답은 questions 배열이어야 합니다.',
@@ -332,9 +337,7 @@ export class AiQuestionService {
       generated.question_type === 'MULTIPLE_CHOICE' &&
       generated.choices.length !== 4
     ) {
-      throw new BadRequestException(
-        '객관식 문제의 선택지는 4개여야 합니다.',
-      );
+      throw new BadRequestException('객관식 문제의 선택지는 4개여야 합니다.');
     }
   }
 }

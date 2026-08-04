@@ -11,11 +11,12 @@ import { FindOptionsWhere, Repository } from 'typeorm';
 import { QuizQuestion } from '../entities/quiz-question.entity';
 import { QuizAttempt } from '../entities/quiz-attempt.entity';
 import { QuizBookmark } from '../entities/quiz-bookmark.entity';
-import { TopicName } from '../entities/topic-name.entity';
+import { QuizCategory } from '../entities/quiz-category.entity';
 import { SubmitAnswerDto } from '../dto/submit-answer.dto';
 import { QuestionResponseDto } from '../dto/response.dto';
 import { FindQuestionsQueryDto } from '../dto/find-questions-query.dto';
 import { TopicResponseDto } from '../dto/topic-response.dto';
+import { TradingService } from '../../trading/services/trading.service';
 
 @Injectable()
 export class LearningService {
@@ -29,20 +30,25 @@ export class LearningService {
     @InjectRepository(QuizBookmark)
     private readonly bookmarkRepository: Repository<QuizBookmark>,
 
-    @InjectRepository(TopicName)
-    private readonly topicRepository: Repository<TopicName>,
+    @InjectRepository(QuizCategory)
+    private readonly categoryRepository: Repository<QuizCategory>,
 
+    private readonly tradingService: TradingService,
   ) {}
 
   async findAllTopics(): Promise<TopicResponseDto[]> {
-    const topics = await this.topicRepository.find({
-      order: { topicId: 'ASC' },
+    const categories = await this.categoryRepository.find({
+      where: { status: 'ACTIVE' },
+      order: { investment_level_id: 'ASC', sort_order: 'ASC', category_id: 'ASC' },
     });
 
-    return topics.map((topic) => ({
-      topicId: topic.topicId,
-      topicName: topic.topicName,
-      description: topic.description,
+    return categories.map((category) => ({
+      topicId: category.category_id,
+      categoryId: category.category_id,
+      investmentLevelId: category.investment_level_id,
+      topicName: category.category_name,
+      categoryName: category.category_name,
+      description: category.problem_direction ?? category.description,
     }));
   }
 
@@ -51,8 +57,8 @@ export class LearningService {
       status: 'ACTIVE',
     };
 
-    if (query.topicId) {
-      where.topic_id = query.topicId;
+    if (query.categoryId ?? query.topicId) {
+      where.category_id = query.categoryId ?? query.topicId;
     }
 
     if (query.investmentLevelId) {
@@ -61,16 +67,14 @@ export class LearningService {
 
     return this.questionRepository.find({
       where,
-      relations: ['choices'],
+      relations: ['choices', 'category'],
       order: {
         question_id: 'DESC',
       },
     });
   }
 
- async findQuestionById(
-    questionId: number,
-  ): Promise<QuestionResponseDto> {
+  async findQuestionById(questionId: number): Promise<QuestionResponseDto> {
     const question = await this.findQuestionEntityById(questionId);
 
     return {
@@ -83,51 +87,61 @@ export class LearningService {
     };
   }
 
- async submitAnswer(
-  userId: number,
-  questionId: number,
-  dto: SubmitAnswerDto,
-) {
-  const question = await this.findQuestionEntityById(questionId);
+  async submitAnswer(userId: number, questionId: number, dto: SubmitAnswerDto) {
+    const question = await this.findQuestionEntityById(questionId);
 
-  const selectedChoice = question.choices.find(
-    (choice) => choice.choice_id === dto.selectedChoiceId,
-  );
-
-  if (!selectedChoice) {
-    throw new BadRequestException(
-      '해당 문제에 속하지 않는 선택지입니다.',
+    const selectedChoice = question.choices.find(
+      (choice) => choice.choice_id === dto.selectedChoiceId,
     );
+
+    if (!selectedChoice) {
+      throw new BadRequestException('해당 문제에 속하지 않는 선택지입니다.');
+    }
+
+    const isCorrect = selectedChoice.is_correct;
+    const reward = isCorrect ? question.reward_cash : 0;
+
+    const previousAttempt = await this.attemptRepository.findOne({
+      where: { user_id: userId, question_id: questionId },
+    });
+    const alreadyRewarded = previousAttempt?.is_correct === true;
+
+    // 같은 사용자가 같은 문제를 이미 푼 경우 기존 기록 삭제
+    await this.attemptRepository.delete({
+      user_id: userId,
+      question_id: questionId,
+    });
+
+    const attempt = this.attemptRepository.create({
+      user_id: userId,
+      question_id: questionId,
+      selected_choice_id: dto.selectedChoiceId,
+      is_correct: isCorrect,
+      reward_cash_earned: reward,
+    });
+
+    const savedAttempt = await this.attemptRepository.save(attempt);
+
+    // ponytail: 이미 보상받은 문제를 재제출해 다시 맞혀도 중복 지급하지 않음.
+    // 반대로 맞힌 문제를 재제출해 틀리게 바뀌는 경우 이미 지급된 금액을 회수하지는 않음
+    // (실제 화폐가 아닌 학습용 시뮬레이션 잔액이라 영향이 제한적) — 회수가 필요해지면 여기서 처리.
+    if (isCorrect && !alreadyRewarded && reward > 0) {
+      await this.tradingService.creditReward(
+        userId,
+        reward,
+        savedAttempt.attempt_id,
+      );
+    }
+
+    return {
+      message: '정답 제출이 완료되었습니다.',
+      questionId,
+      selectedChoiceId: dto.selectedChoiceId,
+      correct: isCorrect,
+      reward,
+      explanation: question.explanation,
+    };
   }
-
-  const isCorrect = selectedChoice.is_correct;
-  const reward = isCorrect ? question.reward_cash : 0;
-
-  // 같은 사용자가 같은 문제를 이미 푼 경우 기존 기록 삭제
-  await this.attemptRepository.delete({
-    user_id: userId,
-    question_id: questionId,
-  });
-
-  const attempt = this.attemptRepository.create({
-    user_id: userId,
-    question_id: questionId,
-    selected_choice_id: dto.selectedChoiceId,
-    is_correct: isCorrect,
-    reward_cash_earned: reward,
-  });
-
-  await this.attemptRepository.save(attempt);
-
-  return {
-    message: '정답 제출이 완료되었습니다.',
-    questionId,
-    selectedChoiceId: dto.selectedChoiceId,
-    correct: isCorrect,
-    reward,
-    explanation: question.explanation,
-  };
-}
 
   async getHistories(userId: number) {
     return this.attemptRepository.find({
@@ -149,19 +163,14 @@ export class LearningService {
     });
 
     const total = attempts.length;
-    const correct = attempts.filter(
-      (attempt) => attempt.is_correct,
-    ).length;
+    const correct = attempts.filter((attempt) => attempt.is_correct).length;
     const wrong = total - correct;
 
     return {
       total,
       correct,
       wrong,
-      accuracy:
-        total === 0
-          ? 0
-          : Number(((correct / total) * 100).toFixed(1)),
+      accuracy: total === 0 ? 0 : Number(((correct / total) * 100).toFixed(1)),
     };
   }
 
@@ -192,9 +201,7 @@ export class LearningService {
     });
 
     if (!wrongNote) {
-      throw new NotFoundException(
-        '해당 오답 기록을 찾을 수 없습니다.',
-      );
+      throw new NotFoundException('해당 오답 기록을 찾을 수 없습니다.');
     }
 
     return wrongNote;
@@ -210,9 +217,7 @@ export class LearningService {
     });
 
     if (wrongNotes.length === 0) {
-      throw new NotFoundException(
-        '삭제할 오답 기록을 찾을 수 없습니다.',
-      );
+      throw new NotFoundException('삭제할 오답 기록을 찾을 수 없습니다.');
     }
 
     await this.attemptRepository.remove(wrongNotes);
@@ -271,9 +276,7 @@ export class LearningService {
     });
 
     if (!bookmark) {
-      throw new NotFoundException(
-        '삭제할 북마크를 찾을 수 없습니다.',
-      );
+      throw new NotFoundException('삭제할 북마크를 찾을 수 없습니다.');
     }
 
     await this.bookmarkRepository.remove(bookmark);
@@ -291,7 +294,7 @@ export class LearningService {
         question_id: questionId,
         status: 'ACTIVE',
       },
-      relations: ['choices'],
+      relations: ['choices', 'category'],
     });
 
     if (!question) {

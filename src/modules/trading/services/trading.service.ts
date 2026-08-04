@@ -172,6 +172,7 @@ export class TradingService {
         account,
         CashHistoryType.BUY,
         -totalAmount,
+        'TRADE',
         savedTrade.tradeId,
       );
 
@@ -247,6 +248,7 @@ export class TradingService {
         account,
         CashHistoryType.SELL,
         totalAmount,
+        'TRADE',
         savedTrade.tradeId,
       );
 
@@ -268,6 +270,37 @@ export class TradingService {
                 quantity: holding.quantity,
                 averagePrice: holding.avgBuyPrice,
               },
+      };
+    });
+  }
+
+  async creditReward(userId: number, amount: number, refId: number | string) {
+    if (amount <= 0) return;
+
+    return this.accountRepository.manager.transaction(async (manager) => {
+      const account = await this.ensureAccountForUpdate(manager, userId);
+
+      account.cashBalance = this.toDecimal(
+        Number(account.cashBalance) + amount,
+      );
+      account.totalAssetValue = await this.calculateTotalAssetValue(
+        manager,
+        account.accountId,
+        account.cashBalance,
+      );
+      await manager.save(TradingAccount, account);
+      await this.saveCashHistory(
+        manager,
+        account,
+        CashHistoryType.REWARD,
+        amount,
+        'QUIZ_ATTEMPT',
+        String(refId),
+      );
+
+      return {
+        cashBalance: account.cashBalance,
+        totalAssetValue: account.totalAssetValue,
       };
     });
   }
@@ -386,7 +419,8 @@ export class TradingService {
     account: TradingAccount,
     historyType: CashHistoryType,
     amount: number,
-    tradeId: string,
+    refType: string,
+    refId: string,
   ) {
     await manager.save(
       AccountCashHistory,
@@ -395,8 +429,8 @@ export class TradingService {
         historyType,
         amount: this.toDecimal(amount),
         balanceAfter: account.cashBalance,
-        refType: 'TRADE',
-        refId: tradeId,
+        refType,
+        refId,
       }),
     );
   }
