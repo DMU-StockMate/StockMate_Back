@@ -419,11 +419,6 @@ export class AiQuestionService {
     };
   }
 
-<<<<<<< HEAD
-  private validateGeneratedQuestionBatch(
-    generatedBatch: GeneratedQuestionBatch,
-  ) {
-=======
   private async saveQuestionDetails(
     question: QuizQuestion,
     details: QuizCategoryDetail[],
@@ -444,7 +439,6 @@ export class AiQuestionService {
   }
 
   private validateGeneratedQuestionBatch(generatedBatch: GeneratedQuestionBatch) {
->>>>>>> community/function
     if (!generatedBatch || !Array.isArray(generatedBatch.questions)) {
       throw new BadRequestException(
         'AI question generation response must contain a questions array.',
@@ -493,13 +487,9 @@ export class AiQuestionService {
       generated.question_type === 'MULTIPLE_CHOICE' &&
       generated.choices.length !== 4
     ) {
-<<<<<<< HEAD
-      throw new BadRequestException('객관식 문제의 선택지는 4개여야 합니다.');
-=======
       throw new BadRequestException(
         'Multiple-choice questions must have exactly 4 choices.',
       );
->>>>>>> community/function
     }
   }
 }

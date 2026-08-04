@@ -10,9 +10,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Redis } from 'ioredis';
 import { FileService } from 'src/modules/file/service/file.service';
 import { Not, Repository } from 'typeorm';
-import { EmailVerificationService } from '../../email/service/email-verification.service';
+import { EmailVerificationService } from '../../email/services/email-verification.service';
 
 import * as bcrypt from 'bcryptjs';
+import { UserRole } from 'src/modules/enums/role-enum';
 import { CheckEmailDto } from '../dto/check-email.dto';
 import { CheckNickNameDto } from '../dto/check-nickname.dto';
 import { CreateUserDto } from '../dto/create-user.dto';

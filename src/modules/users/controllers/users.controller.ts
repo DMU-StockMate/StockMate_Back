@@ -224,7 +224,7 @@ export class UsersController {
 })
 uploadProfileImage(
   @Req() req,
-  @UploadedFile() file: Express.Multer.File,
+  @UploadedFile() file: any,
 ) {
   if (!file) {
     throw new BadRequestException(

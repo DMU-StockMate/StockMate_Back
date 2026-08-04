@@ -1,21 +1,19 @@
 import {
-  Entity,
-  PrimaryGeneratedColumn,
   Column,
-  OneToMany,
+  CreateDateColumn,
+  Entity,
   JoinColumn,
   ManyToOne,
-  CreateDateColumn,
+  OneToMany,
+  PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { QuizChoice } from './quiz-choice.entity';
-import { TopicName } from './topic-name.entity';
+
 import { InvestmentLevel } from './investment-level.entity';
 import { QuizCategory } from './quiz-category.entity';
-<<<<<<< HEAD
-=======
+import { QuizChoice } from './quiz-choice.entity';
 import { QuizQuestionDetail } from './quiz-question-detail.entity';
->>>>>>> community/function
+import { TopicName } from './topic-name.entity';
 
 @Entity('quiz_questions')
 export class QuizQuestion {
@@ -33,7 +31,6 @@ export class QuizQuestion {
   })
   @JoinColumn({ name: 'topic_id' })
   topicName: TopicName;
-
 
   @Column({
     type: 'int',
@@ -84,15 +81,12 @@ export class QuizQuestion {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 
-  @OneToMany(() => QuizChoice, choice => choice.question)
+  @OneToMany(() => QuizChoice, (choice) => choice.question)
   choices: QuizChoice[];
-<<<<<<< HEAD
-=======
 
   @OneToMany(
     () => QuizQuestionDetail,
     (questionDetail) => questionDetail.question,
   )
   questionDetails: QuizQuestionDetail[];
->>>>>>> community/function
 }

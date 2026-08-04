@@ -18,6 +18,7 @@ import { QuizAttempt } from '../entities/quiz-attempt.entity';
 import { QuizBookmark } from '../entities/quiz-bookmark.entity';
 import { QuizCategory } from '../entities/quiz-category.entity';
 import { QuizQuestion } from '../entities/quiz-question.entity';
+import { User } from '../../users/entities/user.entity';
 
 type RecommendationMode = 'mixed' | 'weakness' | 'level' | 'review';
 
@@ -46,22 +47,25 @@ export class LearningService {
     @InjectRepository(QuizCategory)
     private readonly categoryRepository: Repository<QuizCategory>,
 
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+
     private readonly tradingService: TradingService,
   ) {}
 
   async findAllTopics(): Promise<TopicResponseDto[]> {
     const categories = await this.categoryRepository.find({
       where: { status: 'ACTIVE' },
-      order: { investment_level_id: 'ASC', sort_order: 'ASC', category_id: 'ASC' },
+      order: { investmentLevelId: 'ASC', sortOrder: 'ASC', categoryId: 'ASC' },
     });
 
     return categories.map((category) => ({
-      topicId: category.category_id,
-      categoryId: category.category_id,
-      investmentLevelId: category.investment_level_id,
-      topicName: category.category_name,
-      categoryName: category.category_name,
-      description: category.problem_direction ?? category.description,
+      topicId: category.categoryId,
+      categoryId: category.categoryId,
+      investmentLevelId: category.investmentLevelId,
+      topicName: category.categoryName,
+      categoryName: category.categoryName,
+      description: category.problemDirection ?? category.description,
     }));
   }
 

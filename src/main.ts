@@ -20,6 +20,11 @@ async function bootstrap() {
       AppModule,
     );
 
+  app.enableCors({
+    origin: [/^http:\/\/localhost:\d+$/, /^http:\/\/127\.0\.0\.1:\d+$/],
+    credentials: true,
+  });
+
   // 업로드 폴더 자동 생성
   const uploadPath = join(
     process.cwd(),
@@ -48,6 +53,14 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  app.use((req, _res, next) => {
+    if (req.url.startsWith('/api/')) {
+      req.url = req.url.slice(4);
+    }
+
+    next();
+  });
 
   // Swagger 설정
   const config = new DocumentBuilder()
