@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import { BadRequestException, Body, Controller, Delete, Get, Patch, Post, Query, Req, Request, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBadRequestResponse, ApiBearerAuth, ApiBody, ApiConsumes, ApiInternalServerErrorResponse, ApiNotFoundResponse, ApiOperation, ApiResponse, ApiTags, ApiUnauthorizedResponse } from '@nestjs/swagger';
@@ -8,33 +7,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { ChangePasswordDto } from '../dto/change-password.dto';
 import { CheckEmailDto } from '../dto/check-email.dto';
 import { CheckNickNameDto } from '../dto/check-nickname.dto';
-=======
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Param,
-  Request,
-  Patch,
-  UseGuards,
-  Query,
-} from '@nestjs/common';
-import { JwtAuthGuard } from '../guards/jwt-auth.guard';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBody,
-  ApiParam,
-  ApiUnauthorizedResponse,
-  ApiConflictResponse,
-  ApiBadRequestResponse,
-  ApiNotFoundResponse,
-  ApiBearerAuth,
-} from '@nestjs/swagger';
-import { UsersService } from '../services/users.service';
->>>>>>> f171976 (feat: add watchlist API and improve profile management)
 import { CreateUserDto } from '../dto/create-user.dto';
 import { FindEmailDto } from '../dto/find-email.dto';
 import { LoginUserDto } from '../dto/login-user.dto';
@@ -42,7 +14,6 @@ import { ResetPasswordDto } from '../dto/reset-password.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { UsersService } from '../services/users.service';
-
 
 @ApiTags('users')
 @Controller('users')
@@ -162,10 +133,6 @@ export class UsersController {
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('accessToken')
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> b1364d1 (feat: add stock indicators and daily market data sync)
   @Patch()
   @ApiOperation({ summary: '회원 정보 수정 (본인)' })
   @ApiBody({ type: UpdateUserDto })
@@ -177,7 +144,6 @@ export class UsersController {
     return await this.usersService.update(req.user.userId, updateUserDto);
   }
 
-<<<<<<< HEAD
 @Post('me/profile-image')
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth('accessToken')
@@ -298,17 +264,4 @@ deleteProfileImage(@Req() req) {
     req.user.userId,
   );
 }
-=======
-=======
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('accessToken')
->>>>>>> b1364d1 (feat: add stock indicators and daily market data sync)
-  @Patch('me')
-  @ApiOperation({ summary: '회원 정보 수정 (본인)' })
-  @ApiBody({ type: UpdateUserDto })
-  @ApiResponse({ status: 200, description: '회원 정보 수정 성공' })
-  async updateMe(@Request() req, @Body() updateUserDto: UpdateUserDto) {
-    return await this.usersService.update(req.user.userId, updateUserDto);
-  }
->>>>>>> f171976 (feat: add watchlist API and improve profile management)
 }

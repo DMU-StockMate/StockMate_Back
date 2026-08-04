@@ -5,13 +5,9 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-<<<<<<< HEAD
 import { KiwoomWebSocketService } from '../../kiwoom/services/kiwoom-websocket.service';
 import { Stock, StockStatus } from '../../stocks/entities/stock.entity';
 import { StockPriceSnapshotService } from '../../stocks/services/stock-price-snapshot.service';
-=======
-import { Stock, StockStatus } from '../../stocks/entities/stock.entity';
->>>>>>> f171976 (feat: add watchlist API and improve profile management)
 import { CreateWatchlistDto } from '../dto/create-watchlist.dto';
 import { Watchlist } from '../entities/watchlist.entity';
 
@@ -23,13 +19,10 @@ export class WatchlistService {
 
     @InjectRepository(Stock)
     private readonly stockRepository: Repository<Stock>,
-<<<<<<< HEAD
 
     private readonly kiwoomWebSocketService: KiwoomWebSocketService,
 
     private readonly stockPriceSnapshotService: StockPriceSnapshotService,
-=======
->>>>>>> f171976 (feat: add watchlist API and improve profile management)
   ) {}
 
   async create(userId: number, dto: CreateWatchlistDto) {
@@ -68,13 +61,9 @@ export class WatchlistService {
       },
     });
 
-<<<<<<< HEAD
     return Promise.all(
       watchlists.map((watchlist) => this.toResponse(watchlist)),
     );
-=======
-    return watchlists.map((watchlist) => this.toResponse(watchlist));
->>>>>>> f171976 (feat: add watchlist API and improve profile management)
   }
 
   async findOne(userId: number, watchlistId: string) {
@@ -86,13 +75,10 @@ export class WatchlistService {
     const watchlist = await this.findOwnedWatchlist(userId, watchlistId);
     await this.watchlistRepository.remove(watchlist);
 
-<<<<<<< HEAD
     if (this.kiwoomWebSocketService.isSubscribedStock(watchlist.stock.ticker)) {
       this.kiwoomWebSocketService.unsubscribeStocks([watchlist.stock.ticker]);
     }
 
-=======
->>>>>>> f171976 (feat: add watchlist API and improve profile management)
     return {
       message: '관심 종목이 삭제되었습니다.',
       watchlistId,
@@ -116,7 +102,6 @@ export class WatchlistService {
     };
   }
 
-<<<<<<< HEAD
   async subscribeRealtime(userId: number, watchlistId: string) {
     const watchlist = await this.findOwnedWatchlist(userId, watchlistId);
     const stockCode = watchlist.stock.ticker;
@@ -179,8 +164,6 @@ export class WatchlistService {
     };
   }
 
-=======
->>>>>>> f171976 (feat: add watchlist API and improve profile management)
   private async findOwnedWatchlist(userId: number, watchlistId: string) {
     const watchlist = await this.watchlistRepository.findOne({
       where: {
@@ -215,7 +198,6 @@ export class WatchlistService {
     return stock;
   }
 
-<<<<<<< HEAD
   private async toResponse(watchlist: Watchlist) {
     const stockCode = watchlist.stock.ticker;
     const snapshot =
@@ -224,26 +206,17 @@ export class WatchlistService {
         ticker: stockCode,
       });
 
-=======
-  private toResponse(watchlist: Watchlist) {
->>>>>>> f171976 (feat: add watchlist API and improve profile management)
     return {
       watchlistId: watchlist.watchlistId,
       userId: watchlist.userId,
       stockId: watchlist.stockId,
-<<<<<<< HEAD
       stockCode,
       ticker: stockCode,
-=======
-      stockCode: watchlist.stock.ticker,
-      ticker: watchlist.stock.ticker,
->>>>>>> f171976 (feat: add watchlist API and improve profile management)
       companyName: watchlist.stock.companyName,
       market: watchlist.stock.market,
       sector: watchlist.stock.sector,
       currency: watchlist.stock.currency,
       status: watchlist.stock.status,
-<<<<<<< HEAD
       currentPrice: snapshot.currentPrice,
       realtimePrice: snapshot.realtimePrice,
       previousClosePrice: snapshot.previousClosePrice,
@@ -251,8 +224,6 @@ export class WatchlistService {
       changeRate: snapshot.changeRate,
       isRealtimeSubscribed:
         this.kiwoomWebSocketService.isSubscribedStock(stockCode),
-=======
->>>>>>> f171976 (feat: add watchlist API and improve profile management)
       createdAt: watchlist.createdAt,
     };
   }

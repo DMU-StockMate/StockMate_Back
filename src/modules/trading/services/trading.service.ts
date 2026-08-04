@@ -7,17 +7,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { StockPriceDaily } from '../../stocks/entities/stock-price-daily.entity';
 import { Stock, StockStatus } from '../../stocks/entities/stock.entity';
-<<<<<<< HEAD
 import { NotificationType } from '../../notification/entities/notification.entity';
 import { NotificationService } from '../../notification/services/notification.service';
 import { CreateTradeDto } from '../dto/create-trade.dto';
 import { RankingQueryDto } from '../dto/ranking-query.dto';
 import { TradeHistoryQueryDto } from '../dto/trade-history-query.dto';
 import { AccountAssetSnapshot } from '../entities/account-asset-snapshot.entity';
-=======
-import { CreateTradeDto } from '../dto/create-trade.dto';
-import { TradeHistoryQueryDto } from '../dto/trade-history-query.dto';
->>>>>>> 4babd34 (feat: implement core stock, learning, and trading APIs)
 import {
   AccountCashHistory,
   CashHistoryType,
@@ -48,14 +43,11 @@ export class TradingService {
 
     @InjectRepository(StockPriceDaily)
     private readonly stockPriceDailyRepository: Repository<StockPriceDaily>,
-<<<<<<< HEAD
 
     @InjectRepository(AccountAssetSnapshot)
     private readonly assetSnapshotRepository: Repository<AccountAssetSnapshot>,
 
     private readonly notificationService: NotificationService,
-=======
->>>>>>> 4babd34 (feat: implement core stock, learning, and trading APIs)
   ) {}
 
   async findAccount(userId: number) {
@@ -96,7 +88,6 @@ export class TradingService {
     }));
   }
 
-<<<<<<< HEAD
   async findAssetHistory(userId: number, days: number) {
     const account = await this.ensureAccount(userId);
     const since = new Date();
@@ -123,8 +114,6 @@ export class TradingService {
       }));
   }
 
-=======
->>>>>>> 4babd34 (feat: implement core stock, learning, and trading APIs)
   async findTrades(userId: number, query: TradeHistoryQueryDto) {
     const account = await this.ensureAccount(userId);
     const page = query.page ?? 1;
@@ -155,7 +144,6 @@ export class TradingService {
     };
   }
 
-<<<<<<< HEAD
   async findAssetRankings(query: RankingQueryDto) {
     const limit = query.limit ?? 20;
     const rows = await this.accountRepository
@@ -220,10 +208,6 @@ export class TradingService {
 
   async buy(userId: number, dto: CreateTradeDto) {
     const result = await this.accountRepository.manager.transaction(async (manager) => {
-=======
-  async buy(userId: number, dto: CreateTradeDto) {
-    return this.accountRepository.manager.transaction(async (manager) => {
->>>>>>> 4babd34 (feat: implement core stock, learning, and trading APIs)
       const stock = await this.findActiveStock(dto.ticker);
       const price = await this.resolveTradePrice(stock.stockId, dto.price);
       const totalAmount = price * dto.quantity;
@@ -285,10 +269,7 @@ export class TradingService {
         account,
         CashHistoryType.BUY,
         -totalAmount,
-<<<<<<< HEAD
         'TRADE',
-=======
->>>>>>> 4babd34 (feat: implement core stock, learning, and trading APIs)
         savedTrade.tradeId,
       );
 
@@ -306,7 +287,6 @@ export class TradingService {
         },
       };
     });
-<<<<<<< HEAD
 
     await this.notificationService.create(
       userId,
@@ -321,12 +301,6 @@ export class TradingService {
 
   async sell(userId: number, dto: CreateTradeDto) {
     const result = await this.accountRepository.manager.transaction(async (manager) => {
-=======
-  }
-
-  async sell(userId: number, dto: CreateTradeDto) {
-    return this.accountRepository.manager.transaction(async (manager) => {
->>>>>>> 4babd34 (feat: implement core stock, learning, and trading APIs)
       const stock = await this.findActiveStock(dto.ticker);
       const price = await this.resolveTradePrice(stock.stockId, dto.price);
       const totalAmount = price * dto.quantity;
@@ -381,10 +355,7 @@ export class TradingService {
         account,
         CashHistoryType.SELL,
         totalAmount,
-<<<<<<< HEAD
         'TRADE',
-=======
->>>>>>> 4babd34 (feat: implement core stock, learning, and trading APIs)
         savedTrade.tradeId,
       );
 
@@ -408,7 +379,6 @@ export class TradingService {
               },
       };
     });
-<<<<<<< HEAD
 
     await this.notificationService.create(
       userId,
@@ -450,8 +420,6 @@ export class TradingService {
         totalAssetValue: account.totalAssetValue,
       };
     });
-=======
->>>>>>> 4babd34 (feat: implement core stock, learning, and trading APIs)
   }
 
   private async ensureAccount(userId: number) {
@@ -568,12 +536,8 @@ export class TradingService {
     account: TradingAccount,
     historyType: CashHistoryType,
     amount: number,
-<<<<<<< HEAD
     refType: string,
     refId: string,
-=======
-    tradeId: string,
->>>>>>> 4babd34 (feat: implement core stock, learning, and trading APIs)
   ) {
     await manager.save(
       AccountCashHistory,
@@ -582,13 +546,8 @@ export class TradingService {
         historyType,
         amount: this.toDecimal(amount),
         balanceAfter: account.cashBalance,
-<<<<<<< HEAD
         refType,
         refId,
-=======
-        refType: 'TRADE',
-        refId: tradeId,
->>>>>>> 4babd34 (feat: implement core stock, learning, and trading APIs)
       }),
     );
   }
