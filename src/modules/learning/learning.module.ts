@@ -14,7 +14,6 @@ import { QuizQuestionDetail } from './entities/quiz-question-detail.entity';
 import { User } from '../users/entities/user.entity';
 import { TopicName } from './entities/topic-name.entity';
 import { InvestmentLevel } from './entities/investment-level.entity';
-import { QuizCategory } from './entities/quiz-category.entity';
 import { TradingModule } from '../trading/trading.module';
 
 @Module({
@@ -30,7 +29,6 @@ import { TradingModule } from '../trading/trading.module';
       User,
       TopicName,
       InvestmentLevel,
-      QuizCategory,
     ]),
     TradingModule,
   ],
