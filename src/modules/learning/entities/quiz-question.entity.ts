@@ -9,6 +9,7 @@ import {
 import { QuizChoice } from './quiz-choice.entity';
 import { TopicName } from './topic-name.entity';
 import { InvestmentLevel } from './investment-level.entity';
+import { QuizCategory } from './quiz-category.entity';
 
 @Entity('quiz_questions')
 export class QuizQuestion {
@@ -43,6 +44,20 @@ export class QuizQuestion {
   })
   @JoinColumn({ name: 'investment_level_id' })
   investmentLevel: InvestmentLevel | null;
+
+  @Column({
+    type: 'int',
+    name: 'category_id',
+    nullable: true,
+  })
+  category_id: number | null;
+
+  @ManyToOne(() => QuizCategory, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'category_id' })
+  category: QuizCategory | null;
 
   @Column()
   question_type: string;

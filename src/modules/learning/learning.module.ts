@@ -11,6 +11,8 @@ import { QuizBookmark } from './entities/quiz-bookmark.entity';
 import { User } from '../users/entities/user.entity';
 import { TopicName } from './entities/topic-name.entity';
 import { InvestmentLevel } from './entities/investment-level.entity';
+import { QuizCategory } from './entities/quiz-category.entity';
+import { TradingModule } from '../trading/trading.module';
 
 @Module({
   imports: [
@@ -22,7 +24,9 @@ import { InvestmentLevel } from './entities/investment-level.entity';
       User,
       TopicName,
       InvestmentLevel,
+      QuizCategory,
     ]),
+    TradingModule,
   ],
   controllers: [LearningController],
   providers: [LearningService],

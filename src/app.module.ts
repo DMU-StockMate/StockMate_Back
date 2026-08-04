@@ -5,7 +5,8 @@ import { UsersModule } from './modules/users/users.module';
 import { RedisModule } from '@nestjs-modules/ioredis';
 import { AdminModule } from './modules/users/admin.module';
 import { LearningModule } from './modules/learning/learning.module';
-import { KrxModule } from './modules/krx/krx.module';   
+import { InvestmentProfileModule } from './modules/investment-profile/investment-profile.module';
+import { KrxModule } from './modules/krx/krx.module';
 import { AiModule } from './modules/ai/ai.module';
 import { DartModule } from './modules/dart/dart.module';
 import { StocksModule } from './modules/stocks/stocks.module';
@@ -48,6 +49,7 @@ import { CommunityModule } from './modules/community/community.module';
     UsersModule,
     AdminModule,
     LearningModule,
+    InvestmentProfileModule,
     KrxModule,
     StocksModule,
     AiModule,
