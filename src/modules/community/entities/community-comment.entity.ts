@@ -1,47 +1,64 @@
 import {
   Column,
   CreateDateColumn,
+  DeleteDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { User } from 'src/modules/users/entities/user.entity';
-import { CommunityPost } from './community-post.entity';
-import { ContentStatus } from 'src/modules/enums/content-status.enum';
+
+import { User } from '../../users/entities/user.entity';
+import {
+  CommunityContentStatus,
+  CommunityPost,
+} from './community-post.entity';
 
 @Entity('community_comments')
+@Index('idx_community_comments_post_status_created', [
+  'postId',
+  'status',
+  'createdAt',
+])
+@Index('idx_community_comments_user', ['userId'])
 export class CommunityComment {
   @PrimaryGeneratedColumn({ name: 'comment_id' })
-  comment_id: number;
+  commentId: number;
 
-  @Column({ name: 'post_id' })
-  post_id: number;
+  @Column({ name: 'post_id', type: 'int' })
+  postId: number;
 
-  @ManyToOne(() => CommunityPost)
+  @Column({ name: 'user_id', type: 'int' })
+  userId: number;
+
+  @Column({ type: 'text' })
+  content: string;
+
+  @Column({
+    type: 'enum',
+    enum: CommunityContentStatus,
+    default: CommunityContentStatus.ACTIVE,
+  })
+  status: CommunityContentStatus;
+
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt: Date;
+
+  @UpdateDateColumn({ name: 'updated_at' })
+  updatedAt: Date;
+
+  @DeleteDateColumn({ name: 'deleted_at', nullable: true })
+  deletedAt: Date | null;
+
+  @ManyToOne(() => CommunityPost, (post) => post.comments, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'post_id' })
   post: CommunityPost;
 
-  @Column({ name: 'user_id' })
-  user_id: number;
-
-  @ManyToOne(() => User)
+  @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'user_id' })
   user: User;
-
-  @Column('text')
-  content: string;
-
-  @Column({ type: 'enum', enum: ContentStatus, default: ContentStatus.ACTIVE })
-  status: ContentStatus;
-
-  @CreateDateColumn({ name: 'created_at' })
-  created_at: Date;
-
-  @UpdateDateColumn({ name: 'updated_at' })
-  updated_at: Date;
-
-  @Column({ name: 'deleted_at', type: 'timestamp', nullable: true })
-  deleted_at: Date | null;
 }
