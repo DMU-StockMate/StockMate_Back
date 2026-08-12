@@ -2,7 +2,9 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { LearningController } from './controllers/learning.controller';
+import { AdminLearningController } from './controllers/admin-learning.controller';
 import { LearningService } from './services/learning.service';
+import { LearningQualityService } from './services/learning-quality.service';
 
 import { QuizQuestion } from './entities/quiz-question.entity';
 import { QuizChoice } from './entities/quiz-choice.entity';
@@ -32,8 +34,8 @@ import { TradingModule } from '../trading/trading.module';
     ]),
     TradingModule,
   ],
-  controllers: [LearningController],
-  providers: [LearningService],
+  controllers: [LearningController, AdminLearningController],
+  providers: [LearningService, LearningQualityService],
   exports: [LearningService],
 })
 export class LearningModule {}
