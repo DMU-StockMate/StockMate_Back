@@ -13,14 +13,7 @@ export class AiLlamaProviderService {
     context: unknown;
     onToken: (token: string) => void;
   }): Promise<string> {
-    const baseUrl =
-      this.configService.get<string>('LLAMA_API_URL');
-
-    if (!baseUrl) {
-      throw new InternalServerErrorException(
-        'LLAMA_API_URL이 설정되지 않았습니다.',
-      );
-    }
+    const baseUrl = this.getBaseUrl();
 
     try {
       const response = await axios.post(
@@ -39,7 +32,6 @@ export class AiLlamaProviderService {
           buffer += chunk.toString('utf-8');
 
           const events = buffer.split('\n\n');
-
           // 마지막 조각은 아직 덜 도착했을 수 있으므로 남겨둠
           buffer = events.pop() ?? '';
 
@@ -50,9 +42,7 @@ export class AiLlamaProviderService {
               .filter((line) => line.startsWith('data:'));
 
             for (const line of lines) {
-              const dataText = line
-                .replace(/^data:\s*/, '')
-                .trim();
+              const dataText = line.replace(/^data:\s*/, '').trim();
 
               if (!dataText) {
                 continue;
@@ -76,25 +66,17 @@ export class AiLlamaProviderService {
 
                 if (parsed.type === 'error') {
                   reject(
-                    new Error(
-                      parsed.message ?? 'AI 서버 스트리밍 오류',
-                    ),
+                    new Error(parsed.message ?? 'AI 서버 스트리밍 오류'),
                   );
                   return;
                 }
 
                 // meta, done은 사용자 답변 본문이 아니므로 저장하지 않음
-                if (
-                  parsed.type === 'meta' ||
-                  parsed.type === 'done'
-                ) {
+                if (parsed.type === 'meta' || parsed.type === 'done') {
                   continue;
                 }
               } catch {
-                console.error(
-                  'AI SSE JSON 파싱 실패:',
-                  dataText,
-                );
+                console.error('AI SSE JSON 파싱 실패:', dataText);
               }
             }
           }
@@ -118,8 +100,20 @@ export class AiLlamaProviderService {
       );
     }
   }
-  //문제 생성 서비스 
+
   async generateQuestion(context: unknown) {
+    return this.postQuiz('/quiz/generate', context);
+  }
+
+  async generatePromptQuestion(context: unknown) {
+    return this.postQuiz('/quiz/generate/prompt', context);
+  }
+
+  async generateReviewQuestion(context: unknown) {
+    return this.postQuiz('/quiz/generate/review', context);
+  }
+
+  private getBaseUrl() {
     const baseUrl = this.configService.get<string>('LLAMA_API_URL');
 
     if (!baseUrl) {
@@ -128,10 +122,12 @@ export class AiLlamaProviderService {
       );
     }
 
-    const response = await axios.post(
-      `${baseUrl}/quiz/generate`,
-      context,
-    );
+    return baseUrl;
+  }
+
+  private async postQuiz(path: string, context: unknown) {
+    const baseUrl = this.getBaseUrl();
+    const response = await axios.post(`${baseUrl}${path}`, context);
 
     return response.data;
   }

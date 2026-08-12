@@ -17,7 +17,11 @@ import { TopicResponseDto } from '../dto/topic-response.dto';
 import { QuizAttempt } from '../entities/quiz-attempt.entity';
 import { QuizBookmark } from '../entities/quiz-bookmark.entity';
 import { QuizCategory } from '../entities/quiz-category.entity';
-import { QuizQuestion } from '../entities/quiz-question.entity';
+import {
+  QuizQuestion,
+  QuizReviewStatus,
+  QuizVisibility,
+} from '../entities/quiz-question.entity';
 import { User } from '../../users/entities/user.entity';
 
 type RecommendationMode = 'mixed' | 'weakness' | 'level' | 'review';
@@ -72,6 +76,8 @@ export class LearningService {
   async findAllQuestions(query: FindQuestionsQueryDto) {
     const where: FindOptionsWhere<QuizQuestion> = {
       status: 'ACTIVE',
+      visibility: QuizVisibility.PUBLIC,
+      reviewStatus: QuizReviewStatus.ACTIVE,
     };
 
     if (query.categoryId ?? query.topicId) {
@@ -132,7 +138,11 @@ export class LearningService {
         order: { created_at: 'DESC' },
       }),
       this.questionRepository.find({
-        where: { status: 'ACTIVE' },
+        where: {
+          status: 'ACTIVE',
+          visibility: QuizVisibility.PUBLIC,
+          reviewStatus: QuizReviewStatus.ACTIVE,
+        },
         relations: [
           'topicName',
           'category',
@@ -807,6 +817,8 @@ export class LearningService {
       where: {
         question_id: questionId,
         status: 'ACTIVE',
+        visibility: QuizVisibility.PUBLIC,
+        reviewStatus: QuizReviewStatus.ACTIVE,
       },
       relations: ['choices', 'category'],
     });
