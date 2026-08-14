@@ -18,6 +18,9 @@ import { QuizAttempt } from '../entities/quiz-attempt.entity';
 import { QuizBookmark } from '../entities/quiz-bookmark.entity';
 import { QuizCategory } from '../entities/quiz-category.entity';
 import { QuizQuestion } from '../entities/quiz-question.entity';
+import { LearningConcept } from '../entities/learning-concept.entity';
+import { LearningConceptBlock } from '../entities/learning-concept-block.entity';
+import { LearningConceptQuiz } from '../entities/learning-concept-quiz.entity';
 import { User } from '../../users/entities/user.entity';
 
 type RecommendationMode = 'mixed' | 'weakness' | 'level' | 'review';
@@ -50,6 +53,15 @@ export class LearningService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
 
+    @InjectRepository(LearningConcept)
+    private readonly conceptRepository: Repository<LearningConcept>,
+
+    @InjectRepository(LearningConceptBlock)
+    private readonly conceptBlockRepository: Repository<LearningConceptBlock>,
+
+    @InjectRepository(LearningConceptQuiz)
+    private readonly conceptQuizRepository: Repository<LearningConceptQuiz>,
+
     private readonly tradingService: TradingService,
   ) {}
 
@@ -67,6 +79,89 @@ export class LearningService {
       categoryName: category.categoryName,
       description: category.problemDirection ?? category.description,
     }));
+  }
+
+  async findAllConcepts(topicId?: number, investmentLevelId?: number) {
+    const where: FindOptionsWhere<LearningConcept> = {};
+    if (topicId) where.topicId = topicId;
+    if (investmentLevelId) where.investmentLevelId = investmentLevelId;
+
+    const concepts = await this.conceptRepository.find({
+      where,
+      relations: ['topic', 'investmentLevel'],
+      order: { investmentLevelId: 'ASC', sortOrder: 'ASC' },
+    });
+
+    return concepts.map((concept) => this.toConceptSummary(concept));
+  }
+
+  async findConceptBySlug(slug: string) {
+    const concept = await this.conceptRepository.findOne({
+      where: { slug },
+      relations: ['topic', 'investmentLevel'],
+    });
+
+    if (!concept) {
+      throw new NotFoundException('개념을 찾을 수 없습니다.');
+    }
+
+    const blocks = await this.conceptBlockRepository.find({
+      where: { conceptId: concept.conceptId, isVisible: true },
+      order: { sortOrder: 'ASC' },
+    });
+
+    const conceptQuiz = await this.conceptQuizRepository.findOne({
+      where: { conceptId: concept.conceptId },
+      relations: ['question', 'question.choices'],
+    });
+    const quizQuestion = conceptQuiz?.question?.status === 'ACTIVE' ? conceptQuiz.question : null;
+
+    return {
+      ...this.toConceptSummary(concept),
+      prerequisiteText: concept.prerequisiteText,
+      blocks: blocks.map((block) => ({
+        blockId: block.blockId,
+        blockType: block.blockType,
+        sortOrder: block.sortOrder,
+        title: block.title,
+        contentText: block.contentText,
+        contentJson: block.contentJson,
+        styleVariant: block.styleVariant,
+      })),
+      quiz: quizQuestion
+        ? {
+            questionId: quizQuestion.question_id,
+            questionText: quizQuestion.question_text,
+            choices: quizQuestion.choices.map((choice) => ({
+              id: choice.choice_id,
+              text: choice.choice_text,
+            })),
+          }
+        : null,
+    };
+  }
+
+  private toConceptSummary(concept: LearningConcept) {
+    return {
+      conceptId: concept.conceptId,
+      slug: concept.slug,
+      title: concept.title,
+      summary: concept.summary,
+      learningObjectives: concept.learningObjectives,
+      estimatedMinutes: concept.estimatedMinutes,
+      sortOrder: concept.sortOrder,
+      thumbnailUrl: concept.thumbnailUrl,
+      status: concept.status,
+      topic: concept.topic
+        ? { topicId: concept.topic.topicId, topicName: concept.topic.topicName }
+        : null,
+      investmentLevel: concept.investmentLevel
+        ? {
+            investmentLevelId: concept.investmentLevel.investmentLevelId,
+            levelName: concept.investmentLevel.levelName,
+          }
+        : null,
+    };
   }
 
   async findAllQuestions(query: FindQuestionsQueryDto) {
