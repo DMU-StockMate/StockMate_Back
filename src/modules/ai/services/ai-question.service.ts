@@ -13,6 +13,7 @@ import { QuizCategoryDetail } from '../../learning/entities/quiz-category-detail
 import { QuizChoice } from '../../learning/entities/quiz-choice.entity';
 import { QuizQuestionDetail } from '../../learning/entities/quiz-question-detail.entity';
 import {
+  QuizPoolType,
   QuizQuestion,
   QuizQuestionSource,
   QuizReviewStatus,
@@ -428,6 +429,7 @@ export class AiQuestionService {
       category_id: metadata.category?.categoryId ?? null,
       ownerUserId: metadata.userId,
       sourceType: metadata.sourceType,
+      quizPoolType: QuizPoolType.GENERAL,
       visibility: QuizVisibility.PRIVATE,
       sourceQuestionId: metadata.sourceQuestionId,
       source: QuizQuestionSource.AI,
@@ -468,6 +470,7 @@ export class AiQuestionService {
       topic: metadata.topic.topicName ?? generated.topic,
       level: metadata.investmentLevel?.levelName ?? generated.level,
       sourceType: question.sourceType,
+      quizPoolType: question.quizPoolType,
       visibility: question.visibility,
       source: question.source,
       reviewStatus: question.reviewStatus,

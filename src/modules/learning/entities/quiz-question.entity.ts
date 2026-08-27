@@ -28,6 +28,12 @@ export enum QuizVisibility {
   PRIVATE = 'PRIVATE',
 }
 
+export enum QuizPoolType {
+  GENERAL = 'GENERAL',
+  CONCEPT_CHECK = 'CONCEPT_CHECK',
+  BOTH = 'BOTH',
+}
+
 export enum QuizQuestionSource {
   MANUAL = 'MANUAL',
   AI = 'AI',
@@ -100,6 +106,14 @@ export class QuizQuestion {
     default: QuizSourceType.DEFAULT,
   })
   sourceType: QuizSourceType;
+
+  @Column({
+    name: 'quiz_pool_type',
+    type: 'enum',
+    enum: QuizPoolType,
+    default: QuizPoolType.GENERAL,
+  })
+  quizPoolType: QuizPoolType;
 
   @Column({
     type: 'enum',
