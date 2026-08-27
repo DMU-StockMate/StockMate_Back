@@ -1,18 +1,14 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-
-import { AppModule } from './app.module';
-
+import { NestExpressApplication } from '@nestjs/platform-express';
 import {
   DocumentBuilder,
   SwaggerModule,
 } from '@nestjs/swagger';
-
-import { NestExpressApplication } from '@nestjs/platform-express';
-
+import { existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 
-import { existsSync, mkdirSync } from 'fs';
+import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app =
@@ -25,7 +21,6 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // 업로드 폴더 자동 생성
   const uploadPath = join(
     process.cwd(),
     'uploads',
@@ -38,7 +33,6 @@ async function bootstrap() {
     });
   }
 
-  // 정적 파일 제공
   app.useStaticAssets(
     join(process.cwd(), 'uploads'),
     {
@@ -54,15 +48,6 @@ async function bootstrap() {
     }),
   );
 
-  app.use((req, _res, next) => {
-    if (req.url.startsWith('/api/')) {
-      req.url = req.url.slice(4);
-    }
-
-    next();
-  });
-
-  // Swagger 설정
   const config = new DocumentBuilder()
     .setTitle('Stock Mate API')
     .setDescription('Stock Mate API 문서')
@@ -74,7 +59,7 @@ async function bootstrap() {
         scheme: 'bearer',
         bearerFormat: 'JWT',
         name: 'JWT',
-        description: 'JWT 토큰을 입력하세요',
+        description: 'JWT 토큰을 입력하세요.',
         in: 'header',
       },
       'accessToken',
@@ -86,11 +71,19 @@ async function bootstrap() {
 
   SwaggerModule.setup('api', app, document);
 
+  app.use((req, _res, next) => {
+    if (req.url.startsWith('/api/')) {
+      req.url = req.url.slice(4);
+    }
+
+    next();
+  });
+
   await app.listen(3000);
 
   console.log('MAIL_HOST:', process.env.MAIL_HOST);
-console.log('MAIL_USER:', process.env.MAIL_USER);
-console.log('MAIL_PASS exists:', !!process.env.MAIL_PASS);
+  console.log('MAIL_USER:', process.env.MAIL_USER);
+  console.log('MAIL_PASS exists:', !!process.env.MAIL_PASS);
 }
 
 bootstrap();

@@ -7,6 +7,7 @@ import { UpdateQuestionReviewStatusDto } from '../dto/update-question-review-sta
 import { QuizAttempt } from '../entities/quiz-attempt.entity';
 import { QuizCategoryDetail } from '../entities/quiz-category-detail.entity';
 import {
+  QuizPoolType,
   QuizQuestion,
   QuizReviewStatus,
 } from '../entities/quiz-question.entity';
@@ -37,7 +38,7 @@ export class LearningQualityService {
     questions.forEach((question) => {
       reviewStatusCounts[question.reviewStatus] += 1;
 
-      if (!this.isActiveQuestion(question)) {
+      if (!this.isGeneralPoolQuestion(question) || !this.isActiveQuestion(question)) {
         return;
       }
 
@@ -103,8 +104,9 @@ export class LearningQualityService {
       throw new NotFoundException('세부 개념을 찾을 수 없습니다.');
     }
 
-    const questions = (await this.findQuestions()).filter((question) =>
-      this.hasDetail(question, detailId),
+    const questions = (await this.findQuestions()).filter(
+      (question) =>
+        this.isGeneralPoolQuestion(question) && this.hasDetail(question, detailId),
     );
     const activeQuestions = questions.filter((question) =>
       this.isActiveQuestion(question),
@@ -265,6 +267,7 @@ export class LearningQualityService {
         const activeCount = questions.filter(
           (candidate) =>
             candidate.question_id !== question.question_id &&
+            this.isGeneralPoolQuestion(candidate) &&
             this.isActiveQuestion(candidate) &&
             this.hasDetail(candidate, questionDetail.detailId),
         ).length;
@@ -346,6 +349,7 @@ export class LearningQualityService {
           }
         : null,
       sourceType: question.sourceType,
+      quizPoolType: question.quizPoolType,
       visibility: question.visibility,
       source: question.source,
       reviewStatus: question.reviewStatus,
@@ -395,6 +399,7 @@ export class LearningQualityService {
     const similarityScore = this.toNumberOrNull(question.similarityScore);
 
     return (
+      this.isGeneralPoolQuestion(question) &&
       [
         QuizReviewStatus.PENDING,
         QuizReviewStatus.REVIEW_REQUIRED,
@@ -409,6 +414,10 @@ export class LearningQualityService {
       question.status === 'ACTIVE' &&
       question.reviewStatus === QuizReviewStatus.ACTIVE
     );
+  }
+
+  private isGeneralPoolQuestion(question: QuizQuestion) {
+    return question.quizPoolType === QuizPoolType.GENERAL;
   }
 
   private hasDetail(question: QuizQuestion, detailId: number) {

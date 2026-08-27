@@ -36,7 +36,8 @@ export class UsersService {
   ) {}
 
   async create(createUserDto: CreateUserDto): Promise<User> {
-    const { email, password, nickname, role: _role, ...rest } = createUserDto;
+    const { email, password, nickname, role: _role, ...rest } =
+      createUserDto as CreateUserDto & { role?: UserRole };
 
     await this.emailService.checkEmailVerified(email, 'REGISTER');
     await this.checkEmail({ email });

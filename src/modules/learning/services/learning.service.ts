@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, Repository } from 'typeorm';
+import { FindOptionsWhere, In, Repository } from 'typeorm';
 
 import { TradingService } from '../../trading/services/trading.service';
 import { FindQuestionsQueryDto } from '../dto/find-questions-query.dto';
@@ -18,6 +18,7 @@ import { QuizAttempt } from '../entities/quiz-attempt.entity';
 import { QuizBookmark } from '../entities/quiz-bookmark.entity';
 import { QuizCategory } from '../entities/quiz-category.entity';
 import {
+  QuizPoolType,
   QuizQuestion,
   QuizReviewStatus,
   QuizVisibility,
@@ -76,6 +77,7 @@ export class LearningService {
   async findAllQuestions(query: FindQuestionsQueryDto) {
     const where: FindOptionsWhere<QuizQuestion> = {
       status: 'ACTIVE',
+      quizPoolType: In([QuizPoolType.GENERAL, QuizPoolType.BOTH]),
       visibility: QuizVisibility.PUBLIC,
       reviewStatus: QuizReviewStatus.ACTIVE,
     };
@@ -140,6 +142,7 @@ export class LearningService {
       this.questionRepository.find({
         where: {
           status: 'ACTIVE',
+          quizPoolType: In([QuizPoolType.GENERAL, QuizPoolType.BOTH]),
           visibility: QuizVisibility.PUBLIC,
           reviewStatus: QuizReviewStatus.ACTIVE,
         },
@@ -817,6 +820,7 @@ export class LearningService {
       where: {
         question_id: questionId,
         status: 'ACTIVE',
+        quizPoolType: In([QuizPoolType.GENERAL, QuizPoolType.BOTH]),
         visibility: QuizVisibility.PUBLIC,
         reviewStatus: QuizReviewStatus.ACTIVE,
       },
