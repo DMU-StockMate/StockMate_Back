@@ -20,6 +20,7 @@ export class AiLlamaProviderService {
         `${baseUrl}/chat/stream`,
         params.context,
         {
+          headers: this.getAuthHeaders(),
           responseType: 'stream',
         },
       );
@@ -127,8 +128,20 @@ export class AiLlamaProviderService {
 
   private async postQuiz(path: string, context: unknown) {
     const baseUrl = this.getBaseUrl();
-    const response = await axios.post(`${baseUrl}${path}`, context);
+    const response = await axios.post(`${baseUrl}${path}`, context, {
+      headers: this.getAuthHeaders(),
+    });
 
     return response.data;
+  }
+
+  private getAuthHeaders() {
+    const apiKey = this.configService.get<string>('X-API-KEY');
+
+    return apiKey
+      ? {
+          'X-API-Key': apiKey,
+        }
+      : undefined;
   }
 }
