@@ -16,6 +16,9 @@ import { QuizQuestionDetail } from './entities/quiz-question-detail.entity';
 import { User } from '../users/entities/user.entity';
 import { TopicName } from './entities/topic-name.entity';
 import { InvestmentLevel } from './entities/investment-level.entity';
+import { LearningConcept } from './entities/learning-concept.entity';
+import { LearningConceptBlock } from './entities/learning-concept-block.entity';
+import { LearningConceptQuiz } from './entities/learning-concept-quiz.entity';
 import { TradingModule } from '../trading/trading.module';
 
 @Module({
@@ -31,6 +34,9 @@ import { TradingModule } from '../trading/trading.module';
       User,
       TopicName,
       InvestmentLevel,
+      LearningConcept,
+      LearningConceptBlock,
+      LearningConceptQuiz,
     ]),
     TradingModule,
   ],
