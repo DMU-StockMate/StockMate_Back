@@ -68,6 +68,60 @@ export class LearningController {
     return this.learningService.findAllTopics();
   }
 
+  @Get('concepts')
+  @ApiOperation({
+    summary: '개념정리 목록 조회',
+    description: '블로그형 개념 학습 콘텐츠 목록을 조회합니다. topicId, investmentLevelId로 필터링할 수 있습니다.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: '개념정리 목록 조회 성공',
+  })
+  @ApiUnauthorizedResponse({
+    description: `
+- accessToken 없음
+- accessToken 만료
+- 잘못된 토큰
+    `,
+  })
+  findAllConcepts(
+    @Query('topicId') topicId?: string,
+    @Query('investmentLevelId') investmentLevelId?: string,
+  ) {
+    return this.learningService.findAllConcepts(
+      topicId ? Number(topicId) : undefined,
+      investmentLevelId ? Number(investmentLevelId) : undefined,
+    );
+  }
+
+  @Get('concepts/:slug')
+  @ApiOperation({
+    summary: '개념정리 상세 조회',
+    description: '특정 개념정리 콘텐츠와 본문 블록을 조회합니다.',
+  })
+  @ApiParam({
+    name: 'slug',
+    type: String,
+    description: '조회할 개념의 slug',
+  })
+  @ApiResponse({
+    status: 200,
+    description: '개념정리 상세 조회 성공',
+  })
+  @ApiNotFoundResponse({
+    description: '개념을 찾을 수 없습니다.',
+  })
+  @ApiUnauthorizedResponse({
+    description: `
+- accessToken 없음
+- accessToken 만료
+- 잘못된 토큰
+    `,
+  })
+  findConceptBySlug(@Param('slug') slug: string) {
+    return this.learningService.findConceptBySlug(slug);
+  }
+
   @Get('questions')
   @ApiOperation({
     summary: '문제 목록 조회',
