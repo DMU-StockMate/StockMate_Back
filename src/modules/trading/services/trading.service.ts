@@ -8,6 +8,7 @@ import { EntityManager, Repository } from 'typeorm';
 import { StockPriceDaily } from '../../stocks/entities/stock-price-daily.entity';
 import { Stock, StockStatus } from '../../stocks/entities/stock.entity';
 import { CreateTradeDto } from '../dto/create-trade.dto';
+import { RankingQueryDto } from '../dto/ranking-query.dto';
 import { TradeHistoryQueryDto } from '../dto/trade-history-query.dto';
 import {
   AccountCashHistory,
@@ -107,6 +108,68 @@ export class TradingService {
         totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  async findAssetRankings(query: RankingQueryDto) {
+    const limit = query.limit ?? 20;
+    const rows = await this.accountRepository
+      .createQueryBuilder('account')
+      .innerJoin('users', 'user', 'user.user_id = account.user_id')
+      .select('account.user_id', 'userId')
+      .addSelect('user.nickname', 'nickname')
+      .addSelect('user.profile_image_url', 'profileImageUrl')
+      .addSelect('account.total_asset_value', 'totalAssetValue')
+      .addSelect('account.cash_balance', 'cashBalance')
+      .addSelect('account.seed_money', 'seedMoney')
+      .where('user.status = :status', { status: 'ACTIVE' })
+      .orderBy('account.total_asset_value', 'DESC')
+      .addOrderBy('account.updated_at', 'ASC')
+      .limit(limit)
+      .getRawMany();
+
+    return rows.map((row, index) => ({
+      rank: index + 1,
+      userId: Number(row.userId),
+      nickname: row.nickname,
+      profileImageUrl: row.profileImageUrl,
+      totalAssetValue: row.totalAssetValue,
+      cashBalance: row.cashBalance,
+      seedMoney: row.seedMoney,
+    }));
+  }
+
+  async findWeeklyGrowthRankings(query: RankingQueryDto) {
+    const limit = query.limit ?? 20;
+    const rows = await this.accountRepository
+      .createQueryBuilder('account')
+      .innerJoin('users', 'user', 'user.user_id = account.user_id')
+      .select('account.user_id', 'userId')
+      .addSelect('user.nickname', 'nickname')
+      .addSelect('user.profile_image_url', 'profileImageUrl')
+      .addSelect('account.total_asset_value', 'totalAssetValue')
+      .addSelect('account.seed_money', 'seedMoney')
+      .addSelect('account.total_asset_value - account.seed_money', 'growthAmount')
+      .addSelect(
+        'IF(account.seed_money = 0, 0, (account.total_asset_value - account.seed_money) / account.seed_money * 100)',
+        'growthRate',
+      )
+      .where('user.status = :status', { status: 'ACTIVE' })
+      .andWhere('account.updated_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)')
+      .orderBy('growthAmount', 'DESC')
+      .addOrderBy('account.total_asset_value', 'DESC')
+      .limit(limit)
+      .getRawMany();
+
+    return rows.map((row, index) => ({
+      rank: index + 1,
+      userId: Number(row.userId),
+      nickname: row.nickname,
+      profileImageUrl: row.profileImageUrl,
+      totalAssetValue: row.totalAssetValue,
+      seedMoney: row.seedMoney,
+      growthAmount: this.toDecimal(Number(row.growthAmount)),
+      growthRate: Number(row.growthRate).toFixed(2),
+    }));
   }
 
   async buy(userId: number, dto: CreateTradeDto) {
