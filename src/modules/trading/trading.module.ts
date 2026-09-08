@@ -26,10 +26,7 @@ import { TradingService } from './services/trading.service';
     NotificationModule,
   ],
   controllers: [TradingController],
-  providers: [
-    TradingService,
-    AccountAssetSnapshotSchedulerService,
-  ],
+  providers: [TradingService, AccountAssetSnapshotSchedulerService],
   exports: [TradingService],
 })
 export class TradingModule {}
