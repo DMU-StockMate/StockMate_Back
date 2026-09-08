@@ -16,6 +16,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Prepare Docker network
+        run: |
+          docker network inspect stockmate-net >/dev/null 2>&1 || docker network create stockmate-net
+
       - name: Build Docker image
         run: |
           docker build -t stockmate-backend:${{ github.sha }} .
@@ -29,10 +33,10 @@ jobs:
           docker run -d \
             --name stockmate-backend \
             --restart unless-stopped \
+            --network stockmate-net \
             --env-file /opt/stockmate/.env \
             -p 127.0.0.1:3000:3000 \
             stockmate-backend:${{ github.sha }}
-	    --network stockmate-net \
 
       - name: Remove unused images
         run: |
