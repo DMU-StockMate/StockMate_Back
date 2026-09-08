@@ -130,13 +130,14 @@ export class AiLlamaProviderService {
     const baseUrl = this.getBaseUrl();
     const response = await axios.post(`${baseUrl}${path}`, context, {
       headers: this.getAuthHeaders(),
+      timeout: 110000,
     });
 
     return response.data;
   }
 
   private getAuthHeaders() {
-    const apiKey = this.configService.get<string>('X-API-KEY');
+    const apiKey = this.configService.get<string>('AI_API_KEY');
 
     return apiKey
       ? {

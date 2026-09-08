@@ -25,6 +25,9 @@ describe('StocksService', () => {
       {} as any,
       {} as any,
       {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
     );
 
     const chart = await service.findDailyChart('005930', { limit: 2 });

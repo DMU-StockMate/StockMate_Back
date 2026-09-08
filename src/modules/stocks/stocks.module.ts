@@ -10,6 +10,7 @@ import { StocksService } from './services/stocks.service';
 import { StockPriceSnapshotService } from './services/stock-price-snapshot.service';
 import { KiwoomAuthService } from '../kiwoom/services/kiwoom-auth.service';
 import { KiwoomWebSocketService } from '../kiwoom/services/kiwoom-websocket.service';
+import { DartModule } from '../dart/dart.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { KiwoomWebSocketService } from '../kiwoom/services/kiwoom-websocket.serv
       StockInvestmentIndicator,
       StockPriceDaily,
     ]),
+    DartModule,
   ],
   controllers: [StocksController, AdminStocksController],
   providers: [

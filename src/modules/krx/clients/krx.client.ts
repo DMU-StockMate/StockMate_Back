@@ -16,6 +16,7 @@ export class KrxClient {
           AUTH_KEY: this.authKey,
         },
         params,
+        timeout: 10000,
       });
 
       return response.data;
