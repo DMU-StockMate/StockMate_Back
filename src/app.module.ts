@@ -14,6 +14,7 @@ import { TradingModule } from './modules/trading/trading.module';
 import { AdminModule } from './modules/users/admin.module';
 import { UsersModule } from './modules/users/users.module';
 import { WatchlistModule } from './modules/watchlist/watchlist.module';
+import { NotificationModule } from './modules/notification/notification.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { WatchlistModule } from './modules/watchlist/watchlist.module';
     WatchlistModule,
     CommunityModule,
     NewsModule,
+    NotificationModule,
   ],
 })
 export class AppModule {}

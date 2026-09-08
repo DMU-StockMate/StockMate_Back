@@ -7,9 +7,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { StockPriceDaily } from '../../stocks/entities/stock-price-daily.entity';
 import { Stock, StockStatus } from '../../stocks/entities/stock.entity';
+import { NotificationType } from '../../notification/entities/notification.entity';
+import { NotificationService } from '../../notification/services/notification.service';
 import { CreateTradeDto } from '../dto/create-trade.dto';
 import { RankingQueryDto } from '../dto/ranking-query.dto';
 import { TradeHistoryQueryDto } from '../dto/trade-history-query.dto';
+import { AccountAssetSnapshot } from '../entities/account-asset-snapshot.entity';
 import {
   AccountCashHistory,
   CashHistoryType,
@@ -40,6 +43,11 @@ export class TradingService {
 
     @InjectRepository(StockPriceDaily)
     private readonly stockPriceDailyRepository: Repository<StockPriceDaily>,
+
+    @InjectRepository(AccountAssetSnapshot)
+    private readonly assetSnapshotRepository: Repository<AccountAssetSnapshot>,
+
+    private readonly notificationService: NotificationService,
   ) {}
 
   async findAccount(userId: number) {
@@ -78,6 +86,32 @@ export class TradingService {
       averagePrice: holding.avgBuyPrice,
       updatedAt: holding.updatedAt,
     }));
+  }
+
+  async findAssetHistory(userId: number, days: number) {
+    const account = await this.ensureAccount(userId);
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+
+    const snapshots = await this.assetSnapshotRepository.find({
+      where: {
+        accountId: account.accountId,
+      },
+      order: {
+        snapshotDate: 'ASC',
+      },
+    });
+
+    const sinceDate = since.toISOString().slice(0, 10);
+
+    return snapshots
+      .filter((snapshot) => snapshot.snapshotDate >= sinceDate)
+      .map((snapshot) => ({
+        date: snapshot.snapshotDate,
+        cashBalance: snapshot.cashBalance,
+        stockValue: snapshot.stockValue,
+        totalAssetValue: snapshot.totalAssetValue,
+      }));
   }
 
   async findTrades(userId: number, query: TradeHistoryQueryDto) {
@@ -173,7 +207,7 @@ export class TradingService {
   }
 
   async buy(userId: number, dto: CreateTradeDto) {
-    return this.accountRepository.manager.transaction(async (manager) => {
+    const result = await this.accountRepository.manager.transaction(async (manager) => {
       const stock = await this.findActiveStock(dto.ticker);
       const price = await this.resolveTradePrice(stock.stockId, dto.price);
       const totalAmount = price * dto.quantity;
@@ -253,10 +287,20 @@ export class TradingService {
         },
       };
     });
+
+    await this.notificationService.create(
+      userId,
+      NotificationType.TRADE_EXECUTED,
+      '매수 체결 완료',
+      `${result.trade.companyName} ${dto.quantity}주 매수가 체결되었습니다.`,
+      `/trade/stocks/${result.trade.ticker}`,
+    );
+
+    return result;
   }
 
   async sell(userId: number, dto: CreateTradeDto) {
-    return this.accountRepository.manager.transaction(async (manager) => {
+    const result = await this.accountRepository.manager.transaction(async (manager) => {
       const stock = await this.findActiveStock(dto.ticker);
       const price = await this.resolveTradePrice(stock.stockId, dto.price);
       const totalAmount = price * dto.quantity;
@@ -335,6 +379,16 @@ export class TradingService {
               },
       };
     });
+
+    await this.notificationService.create(
+      userId,
+      NotificationType.TRADE_EXECUTED,
+      '매도 체결 완료',
+      `${result.trade.companyName} ${dto.quantity}주 매도가 체결되었습니다.`,
+      `/trade/stocks/${result.trade.ticker}`,
+    );
+
+    return result;
   }
 
   async creditReward(userId: number, amount: number, refId: number | string) {

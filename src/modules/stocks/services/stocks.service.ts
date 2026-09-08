@@ -1,11 +1,17 @@
 import {
   BadRequestException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
   NotImplementedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import axios from 'axios';
+import { concat, from, fromEvent, Observable, of } from 'rxjs';
+import { filter, map, mergeMap } from 'rxjs/operators';
+import type { MessageEvent } from '@nestjs/common';
 import { StockPriceQueryDto } from '../dto/stock-price-query.dto';
 import { StockSearchQueryDto } from '../dto/stock-search-query.dto';
 import { UpdateStockDto } from '../dto/update-stock.dto';
@@ -15,7 +21,12 @@ import { StockInvestmentIndicator } from '../entities/stock-investment-indicator
 import { StockPriceDaily } from '../entities/stock-price-daily.entity';
 import { Stock, StockStatus } from '../entities/stock.entity';
 import { StockMarket } from '../../enums/stock-market.enum';
-import { KiwoomWebSocketService } from '../../kiwoom/services/kiwoom-websocket.service';
+import { DartService } from '../../dart/services/dart.service';
+import { KiwoomAuthService } from '../../kiwoom/services/kiwoom-auth.service';
+import {
+  KiwoomWebSocketService,
+  StockTick,
+} from '../../kiwoom/services/kiwoom-websocket.service';
 import { StockPriceSnapshotService } from './stock-price-snapshot.service';
 
 @Injectable()
@@ -36,6 +47,12 @@ export class StocksService {
     private readonly kiwoomWebSocketService: KiwoomWebSocketService,
 
     private readonly stockPriceSnapshotService: StockPriceSnapshotService,
+
+    private readonly dartService: DartService,
+
+    private readonly kiwoomAuthService: KiwoomAuthService,
+
+    private readonly configService: ConfigService,
   ) {}
 
   async findAll(query: StockSearchQueryDto) {
@@ -210,8 +227,127 @@ export class StocksService {
     };
   }
 
-  findFinancials(ticker: string) {
-    return this.throwStockDataNotImplemented(ticker, '재무 정보');
+  async findFinancials(ticker: string) {
+    // DART에 사업보고서가 아직 없거나 종목코드가 매핑되지 않으면 빈 객체로 응답해
+    // 프런트의 "재무 정보 없음" 처리로 자연스럽게 넘어가게 한다.
+    try {
+      return await this.dartService.getFinancialSummary(ticker);
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * 네이버 금융이 쓰는 와이즈리포트(WiseReport) 기업개요 페이지에서
+   * "주요제품 매출구성" 표를 가져옵니다. DART Open API엔 이 데이터가 없어
+   * 같은 데이터를 쓰는 와이즈리포트 공개 페이지를 대신 이용합니다.
+   */
+  async findRevenueComposition(ticker: string) {
+    try {
+      const response = await axios.get<string>(
+        'https://navercomp.wisereport.co.kr/v2/company/c1020001.aspx',
+        {
+          params: { cmp_cd: ticker },
+          headers: {
+            'User-Agent': 'Mozilla/5.0',
+            Referer: 'https://finance.naver.com/',
+          },
+          timeout: 10000,
+        },
+      );
+
+      const html = response.data;
+      const tableMatch = html.match(/id="cTB203"[\s\S]*?<\/table>/);
+
+      if (!tableMatch) {
+        return { ticker, period: null, items: [] };
+      }
+
+      const rowPattern = /title="([^"]*)"[^>]*>[\s\S]*?<td[^>]*>([^<]*)<\/td>/g;
+      const items = [...tableMatch[0].matchAll(rowPattern)]
+        .map(([, nameRaw, ratioRaw]) => ({
+          name: nameRaw.replace(/&nbsp;/g, '').trim(),
+          ratio: Number(ratioRaw.replace(/&nbsp;/g, '').replace(/[^0-9.-]/g, '')),
+        }))
+        .filter((item) => item.name && Number.isFinite(item.ratio) && item.ratio !== 0);
+
+      const periodMatch = html.match(/주요제품\s*매출구성\(([^)]+)\)/);
+
+      return {
+        ticker,
+        period: periodMatch ? periodMatch[1].trim() : null,
+        items,
+      };
+    } catch {
+      return { ticker, period: null, items: [] };
+    }
+  }
+
+  /**
+   * 키움 REST API ka10059(종목별투자자기관별요청)로 외국인/기관/개인 순매수 동향을 조회합니다.
+   */
+  async findInvestorTrend(ticker: string, date?: string) {
+    const host =
+      this.configService.get<string>('KIWOOM_API_HOST') ??
+      'https://api.kiwoom.com';
+    const token = await this.kiwoomAuthService.getAccessToken();
+
+    const today = new Date();
+    const dt =
+      date ??
+      `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+
+    const response = await axios.post(
+      `${host}/api/dostk/stkinfo`,
+      {
+        dt,
+        stk_cd: ticker,
+        amt_qty_tp: '1', // 1: 금액
+        trde_tp: '0', // 0: 순매수
+        unit_tp: '1000', // 천주/천원 단위
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json;charset=UTF-8',
+          authorization: `Bearer ${token}`,
+          'api-id': 'ka10059',
+          'cont-yn': 'N',
+          'next-key': '',
+        },
+      },
+    );
+
+    if (response.data?.return_code !== 0) {
+      throw new InternalServerErrorException(
+        `키움 투자자 동향 조회 실패: ${response.data?.return_msg}`,
+      );
+    }
+
+    const rows = response.data?.stk_invsr_orgn ?? [];
+    // amt_qty_tp: '1'(금액) + unit_tp: '1000'(천원 단위) 조합이라 원 단위로 환산
+    const toWon = (value: string) => Number(value ?? '0') * 1000;
+
+    const days = rows
+      .map((row: Record<string, string>) => ({
+        date: row.dt,
+        individualNet: toWon(row.ind_invsr),
+        foreignNet: toWon(row.frgnr_invsr),
+        institutionNet: toWon(row.orgn),
+        institutionDetail: {
+          financialInvestment: toWon(row.fnnc_invt),
+          insurance: toWon(row.insrnc),
+          investmentTrust: toWon(row.invtrt),
+          otherFinance: toWon(row.etc_fnnc),
+          bank: toWon(row.bank),
+          pensionFund: toWon(row.penfnd_etc),
+          privateFund: toWon(row.samo_fund),
+          nation: toWon(row.natn),
+          otherCorp: toWon(row.etc_corp),
+        },
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    return { ticker, days };
   }
 
   async findIndicators(ticker: string) {
@@ -723,59 +859,51 @@ export class StocksService {
     const orderBy = type === 'volume' ? 'latest.volume' : 'changeRate';
     const orderDirection = type === 'fall' ? 'ASC' : 'DESC';
 
-    const queryBuilder = this.stockRepository
-      .createQueryBuilder('stock')
-      .innerJoin(
-        StockPriceDaily,
-        'latest',
-        `latest.stock_id = stock.stock_id
-        AND latest.trade_date = (
-          SELECT MAX(lp.trade_date)
-          FROM stock_price_daily lp
-          WHERE lp.stock_id = stock.stock_id
-        )`,
+    // stock_id별 MAX(trade_date)를 종목마다 상관 서브쿼리로 구하면(예전 방식)
+    // 2700여 종목 x 종목당 수백~수천 행을 매번 스캔해 20초 넘게 걸림 — 프런트 axios
+    // 기본 타임아웃(5s)을 넘겨 랭킹이 아예 안 뜨는 원인이었음.
+    // ROW_NUMBER 윈도우 함수로 한 번에 순위를 매기는 방식으로 바꿔서 0.5초대로 단축.
+    // ponytail: 최근 60일 내 거래가 없는 종목은 전일 종가를 못 찾아 상승/하락 랭킹에서
+    // 빠짐(거래량 랭킹은 영향 없음) — 60일 넘게 거래정지된 종목까지 반영해야 하면
+    // INTERVAL 값을 늘리되 성능 재확인 필요.
+    const requirePreviousClose = type !== 'volume';
+
+    const rows = await this.stockRepository.manager.query(
+      `
+      WITH ranked AS (
+        SELECT
+          stock_id, trade_date, open_price, high_price, low_price, close_price, volume,
+          ROW_NUMBER() OVER (PARTITION BY stock_id ORDER BY trade_date DESC) AS rn
+        FROM stock_price_daily
+        WHERE trade_date >= (CURDATE() - INTERVAL 60 DAY)
       )
-      .leftJoin(
-        StockPriceDaily,
-        'previous',
-        `previous.stock_id = stock.stock_id
-        AND previous.trade_date = (
-          SELECT MAX(pp.trade_date)
-          FROM stock_price_daily pp
-          WHERE pp.stock_id = stock.stock_id
-            AND pp.trade_date < latest.trade_date
-        )`,
-      )
-      .select('stock.stockId', 'stockId')
-      .addSelect('stock.ticker', 'ticker')
-      .addSelect('stock.companyName', 'companyName')
-      .addSelect('stock.market', 'market')
-      .addSelect('stock.sector', 'sector')
-      .addSelect('latest.tradeDate', 'tradeDate')
-      .addSelect('latest.openPrice', 'openPrice')
-      .addSelect('latest.highPrice', 'highPrice')
-      .addSelect('latest.lowPrice', 'lowPrice')
-      .addSelect('latest.closePrice', 'closePrice')
-      .addSelect('latest.volume', 'volume')
-      .addSelect('previous.closePrice', 'previousClosePrice')
-      .addSelect(
-        `CASE
+      SELECT
+        s.stock_id AS stockId,
+        s.ticker AS ticker,
+        s.company_name AS companyName,
+        s.market AS market,
+        s.sector AS sector,
+        latest.trade_date AS tradeDate,
+        latest.open_price AS openPrice,
+        latest.high_price AS highPrice,
+        latest.low_price AS lowPrice,
+        latest.close_price AS closePrice,
+        latest.volume AS volume,
+        previous.close_price AS previousClosePrice,
+        CASE
           WHEN previous.close_price IS NULL OR previous.close_price = 0 THEN NULL
           ELSE ((latest.close_price - previous.close_price) / previous.close_price) * 100
-        END`,
-        'changeRate',
-      )
-      .where('stock.isActive = :isActive', {
-        isActive: true,
-      })
-      .orderBy(orderBy, orderDirection)
-      .limit(normalizedLimit);
-
-    if (type !== 'volume') {
-      queryBuilder.andWhere('previous.close_price IS NOT NULL');
-    }
-
-    const rows = await queryBuilder.getRawMany();
+        END AS changeRate
+      FROM stocks s
+      JOIN ranked latest ON latest.stock_id = s.stock_id AND latest.rn = 1
+      LEFT JOIN ranked previous ON previous.stock_id = s.stock_id AND previous.rn = 2
+      WHERE s.is_active = 1
+        ${requirePreviousClose ? 'AND previous.close_price IS NOT NULL' : ''}
+      ORDER BY ${orderBy} ${orderDirection}
+      LIMIT ?
+      `,
+      [normalizedLimit],
+    );
 
     return rows.map((row) => ({
       stockId: row.stockId,
@@ -855,5 +983,59 @@ export class StocksService {
 
   getAllCurrentPrices() {
     return this.kiwoomWebSocketService.getAllCurrentPrices();
+  }
+
+  // 틱 단위 실시간 시세 스트림. previousClosePrice는 장중에 안 바뀌므로 스트림
+  // 시작 시 한 번만 조회하고, 이후 틱마다 등락은 메모리에서 계산해 DB를 다시 안 친다.
+  streamCurrentPrice(ticker: string): Observable<MessageEvent> {
+    return from(this.getStreamContext(ticker)).pipe(
+      mergeMap(({ previousClosePrice, initialPrice }) => {
+        const toEvent = (price: number): MessageEvent => {
+          const change = this.stockPriceSnapshotService.calculatePriceChange(
+            price,
+            previousClosePrice,
+          );
+
+          return {
+            data: {
+              stockCode: ticker,
+              ticker,
+              price,
+              currentPrice: price,
+              previousClosePrice,
+              changePrice: change.changePrice,
+              changeRate: change.changeRate,
+            },
+          };
+        };
+
+        const ticks$ = fromEvent<StockTick>(
+          this.kiwoomWebSocketService,
+          'tick',
+        ).pipe(
+          filter((tick) => tick.stockCode === ticker),
+          map((tick) => toEvent(tick.price)),
+        );
+
+        return initialPrice === null
+          ? ticks$
+          : concat(of(toEvent(initialPrice)), ticks$);
+      }),
+    );
+  }
+
+  private async getStreamContext(ticker: string) {
+    const stock = await this.findByTicker(ticker);
+    const [latestPrice] =
+      await this.stockPriceSnapshotService.findTwoLatestPricesByStock(
+        stock.stockId,
+      );
+    const previousClosePrice = this.stockPriceSnapshotService.toNumberOrNull(
+      latestPrice?.closePrice,
+    );
+    const initialPrice =
+      await this.kiwoomWebSocketService.getCurrentPrice(ticker);
+
+    return { previousClosePrice, initialPrice };
   }
 }

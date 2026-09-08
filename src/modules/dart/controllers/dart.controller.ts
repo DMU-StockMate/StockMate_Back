@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Param,
+  ParseIntPipe,
   Post,
   Query,
 } from '@nestjs/common';
@@ -47,6 +48,50 @@ export class DartController {
       businessYear,
       reportCode ?? '11011',
     );
+  }
+
+  @Get('stocks/:stockCode/financial-summary')
+  @ApiOperation({
+    summary: '핵심 재무 요약 조회',
+    description:
+      '매출액/영업이익/당기순이익/자산·부채·자본총계를 요약해 반환합니다. ' +
+      'businessYear 미지정 시 직전 연도 → 2년 전 순으로 자동 시도합니다.',
+  })
+  @ApiParam({ name: 'stockCode', example: '005930', description: '종목코드' })
+  @ApiQuery({
+    name: 'businessYear',
+    required: false,
+    example: '2024',
+    description: '사업연도 (기본값: 직전 연도 자동 시도)',
+  })
+  @ApiQuery({
+    name: 'reportCode',
+    required: false,
+    example: '11011',
+    description: '보고서 코드 (기본값: 11011 사업보고서)',
+  })
+  @ApiResponse({ status: 200, description: '핵심 재무 요약 조회 성공' })
+  getFinancialSummary(
+    @Param('stockCode') stockCode: string,
+    @Query('businessYear') businessYear?: string,
+    @Query('reportCode') reportCode?: '11011' | '11012' | '11013' | '11014',
+  ) {
+    return this.dartService.getFinancialSummary(stockCode, businessYear, reportCode);
+  }
+
+  @Get('stocks/:stockCode/disclosures')
+  @ApiOperation({
+    summary: '최근 공시 목록 조회',
+    description: 'DART 공시검색 API를 이용해 종목의 최근 공시 목록을 반환합니다.',
+  })
+  @ApiParam({ name: 'stockCode', example: '005930', description: '종목코드' })
+  @ApiQuery({ name: 'count', required: false, example: 15, description: '조회 개수' })
+  @ApiResponse({ status: 200, description: '최근 공시 목록 조회 성공' })
+  getDisclosures(
+    @Param('stockCode') stockCode: string,
+    @Query('count', new ParseIntPipe({ optional: true })) count?: number,
+  ) {
+    return this.dartService.getDisclosures(stockCode, count ?? 15);
   }
 
   @Post('stocks/:stockCode/sync-indicators')

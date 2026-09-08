@@ -181,6 +181,105 @@ export class DartService {
     };
   }
 
+  /**
+   * 종목의 핵심 재무 항목(매출액/영업이익/당기순이익/자산·부채·자본총계)을 요약해 반환합니다.
+   * businessYear 미지정 시 직전 연도 → 2년 전 순으로 자동 시도합니다.
+   */
+  async getFinancialSummary(
+    stockCode: string,
+    businessYear?: string,
+    reportCode: '11011' | '11012' | '11013' | '11014' = '11011',
+  ) {
+    const currentYear = new Date().getFullYear();
+    const yearsToTry = businessYear
+      ? [businessYear]
+      : [String(currentYear - 1), String(currentYear - 2)];
+
+    let lastError: unknown;
+    for (const year of yearsToTry) {
+      try {
+        return await this.getFinancialSummaryForYear(stockCode, year, reportCode);
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    throw lastError;
+  }
+
+  private async getFinancialSummaryForYear(
+    stockCode: string,
+    businessYear: string,
+    reportCode: '11011' | '11012' | '11013' | '11014',
+  ) {
+    const corp = await this.findCorpByStockCode(stockCode);
+    const financials = await this.getSingleCompanyFinancials({
+      corpCode: corp.corpCode,
+      businessYear,
+      reportCode,
+    });
+
+    const pick = (include: string[], exclude: string[] = []) =>
+      this.extractFinancialAmount(financials, include, exclude);
+
+    return {
+      corpName: corp.corpName,
+      businessYear,
+      reportName: this.getReportName(reportCode),
+      매출액: pick(['매출액', '수익(매출액)']),
+      영업이익: pick(['영업이익']),
+      당기순이익: pick(['당기순이익'], ['지배주주', '비지배주주']),
+      자산총계: pick(['자산총계']),
+      부채총계: pick(['부채총계']),
+      자본총계: pick(['자본총계'], ['지배주주', '비지배주주']),
+    };
+  }
+
+  /**
+   * 종목의 최근 공시 목록을 조회합니다.
+   */
+  async getDisclosures(stockCode: string, count = 15) {
+    const corp = await this.findCorpByStockCode(stockCode);
+    const apiKey = this.getApiKey();
+
+    const end = new Date();
+    const begin = new Date(end);
+    begin.setFullYear(begin.getFullYear() - 1);
+    const toYyyymmdd = (date: Date) =>
+      `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`;
+
+    const response = await axios.get(`${this.baseUrl}/list.json`, {
+      params: {
+        crtfc_key: apiKey,
+        corp_code: corp.corpCode,
+        // bgn_de/end_de를 생략하면 DART가 검색 결과를 아예 반환하지 않는다 (status 013).
+        bgn_de: toYyyymmdd(begin),
+        end_de: toYyyymmdd(end),
+        page_no: 1,
+        page_count: count,
+        sort: 'date',
+        sort_mth: 'desc',
+      },
+    });
+
+    // '013'은 DART API 규격상 '조회된 데이터가 없습니다'를 의미하므로 빈 목록으로 처리
+    if (response.data.status === '013') return [];
+
+    if (response.data.status !== '000') {
+      throw new NotFoundException(
+        `DART 공시 목록 조회 실패: ${response.data.message}`,
+      );
+    }
+
+    return (response.data.list as Array<Record<string, string>>).map((item) => ({
+      rceptNo: item.rcept_no,
+      title: item.report_nm,
+      submitter: item.flr_nm,
+      receiptDate: item.rcept_dt,
+      remark: item.rm,
+      url: `https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${item.rcept_no}`,
+    }));
+  }
+
   private async findCorpByStockCode(stockCode: string) {
     const cache = await this.getCorpCodeCache();
     const found = cache.get(stockCode);

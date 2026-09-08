@@ -50,6 +50,17 @@ export class TradingController {
     return this.tradingService.findTrades(req.user.userId, query);
   }
 
+  @Get('asset-history')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: '내 자산 추이(일별 스냅샷) 조회' })
+  @ApiResponse({ status: 200, description: '자산 추이 조회 성공' })
+  findAssetHistory(@Request() req, @Query('days') days?: string) {
+    return this.tradingService.findAssetHistory(
+      req.user.userId,
+      Number(days ?? 30),
+    );
+  }
+
   @Get('rankings/assets')
   @ApiOperation({ summary: '자산 랭킹 조회' })
   @ApiResponse({ status: 200, description: '자산 랭킹 조회 성공' })

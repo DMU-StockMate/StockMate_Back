@@ -8,6 +8,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { Stock } from '../../stocks/entities/stock.entity';
+import { NotificationType } from '../../notification/entities/notification.entity';
+import { NotificationService } from '../../notification/services/notification.service';
 import { CommunityCommentQueryDto } from '../dto/community-comment-query.dto';
 import { CommunityPostQueryDto } from '../dto/community-post-query.dto';
 import { CreateCommunityCommentDto } from '../dto/create-community-comment.dto';
@@ -36,6 +38,8 @@ export class CommunityService {
 
     @InjectRepository(Stock)
     private readonly stockRepository: Repository<Stock>,
+
+    private readonly notificationService: NotificationService,
   ) {}
 
   findFreePosts(query: CommunityPostQueryDto) {
@@ -154,7 +158,7 @@ export class CommunityService {
     postId: number,
     dto: CreateCommunityCommentDto,
   ) {
-    await this.findActivePost(postId);
+    const post = await this.findActivePost(postId);
 
     const comment = await this.commentRepository.save(
       this.commentRepository.create({
@@ -164,6 +168,16 @@ export class CommunityService {
       }),
     );
     await this.postRepository.increment({ postId }, 'commentCount', 1);
+
+    if (post.userId !== userId) {
+      await this.notificationService.create(
+        post.userId,
+        NotificationType.COMMUNITY_COMMENT,
+        '새 댓글이 달렸습니다',
+        `"${post.title}" 글에 새 댓글이 달렸습니다.`,
+        `/community/${postId}`,
+      );
+    }
 
     return this.commentRepository.findOne({
       where: { commentId: comment.commentId },
@@ -208,7 +222,7 @@ export class CommunityService {
   }
 
   async likePost(userId: number, postId: number) {
-    await this.findActivePost(postId);
+    const post = await this.findActivePost(postId);
 
     const existing = await this.likeRepository.findOne({
       where: { postId, userId },
@@ -220,6 +234,16 @@ export class CommunityService {
 
     await this.likeRepository.save(this.likeRepository.create({ postId, userId }));
     await this.postRepository.increment({ postId }, 'likeCount', 1);
+
+    if (post.userId !== userId) {
+      await this.notificationService.create(
+        post.userId,
+        NotificationType.COMMUNITY_LIKE,
+        '새 좋아요를 받았습니다',
+        `"${post.title}" 글에 좋아요가 달렸습니다.`,
+        `/community/${postId}`,
+      );
+    }
 
     return { message: '좋아요가 등록되었습니다.', postId };
   }
