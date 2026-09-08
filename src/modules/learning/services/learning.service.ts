@@ -169,24 +169,32 @@ export class LearningService {
     };
   }
 
-  async findAllQuestions(query: FindQuestionsQueryDto) {
-    const where: FindOptionsWhere<QuizQuestion> = {
+  async findAllQuestions(userId: number, query: FindQuestionsQueryDto) {
+    const publicWhere: FindOptionsWhere<QuizQuestion> = {
       status: 'ACTIVE',
       quizPoolType: In([QuizPoolType.GENERAL, QuizPoolType.BOTH]),
       visibility: QuizVisibility.PUBLIC,
       reviewStatus: QuizReviewStatus.ACTIVE,
     };
+    const privateWhere: FindOptionsWhere<QuizQuestion> = {
+      status: 'ACTIVE',
+      quizPoolType: In([QuizPoolType.GENERAL, QuizPoolType.BOTH]),
+      visibility: QuizVisibility.PRIVATE,
+      ownerUserId: userId,
+    };
 
     if (query.categoryId ?? query.topicId) {
-      where.category_id = query.categoryId ?? query.topicId;
+      publicWhere.category_id = query.categoryId ?? query.topicId;
+      privateWhere.category_id = query.categoryId ?? query.topicId;
     }
 
     if (query.investmentLevelId) {
-      where.investment_level_id = query.investmentLevelId;
+      publicWhere.investment_level_id = query.investmentLevelId;
+      privateWhere.investment_level_id = query.investmentLevelId;
     }
 
     return this.questionRepository.find({
-      where,
+      where: [publicWhere, privateWhere],
       relations: ['choices', 'category'],
       order: {
         question_id: 'DESC',
@@ -235,12 +243,20 @@ export class LearningService {
         order: { created_at: 'DESC' },
       }),
       this.questionRepository.find({
-        where: {
-          status: 'ACTIVE',
-          quizPoolType: In([QuizPoolType.GENERAL, QuizPoolType.BOTH]),
-          visibility: QuizVisibility.PUBLIC,
-          reviewStatus: QuizReviewStatus.ACTIVE,
-        },
+        where: [
+          {
+            status: 'ACTIVE',
+            quizPoolType: In([QuizPoolType.GENERAL, QuizPoolType.BOTH]),
+            visibility: QuizVisibility.PUBLIC,
+            reviewStatus: QuizReviewStatus.ACTIVE,
+          },
+          {
+            status: 'ACTIVE',
+            quizPoolType: In([QuizPoolType.GENERAL, QuizPoolType.BOTH]),
+            visibility: QuizVisibility.PRIVATE,
+            ownerUserId: userId,
+          },
+        ],
         relations: [
           'topicName',
           'category',
@@ -351,10 +367,11 @@ export class LearningService {
     };
   }
 
- async findQuestionById(
+  async findQuestionById(
+    userId: number,
     questionId: number,
   ): Promise<QuestionResponseDto> {
-    const question = await this.findQuestionEntityById(questionId);
+    const question = await this.findQuestionEntityById(userId, questionId);
 
     return {
       questionId: question.question_id,
@@ -367,7 +384,7 @@ export class LearningService {
   }
 
   async submitAnswer(userId: number, questionId: number, dto: SubmitAnswerDto) {
-    const question = await this.findQuestionEntityById(questionId);
+    const question = await this.findQuestionEntityById(userId, questionId);
 
     const selectedChoice = question.choices.find(
       (choice) => choice.choice_id === dto.selectedChoiceId,
@@ -508,7 +525,7 @@ export class LearningService {
   }
 
   async addBookmark(userId: number, questionId: number) {
-    await this.findQuestionById(questionId);
+    await this.findQuestionById(userId, questionId);
 
     const exists = await this.bookmarkRepository.findOne({
       where: {
@@ -909,16 +926,26 @@ export class LearningService {
   }
 
   private async findQuestionEntityById(
+    userId: number,
     questionId: number,
   ): Promise<QuizQuestion> {
     const question = await this.questionRepository.findOne({
-      where: {
-        question_id: questionId,
-        status: 'ACTIVE',
-        quizPoolType: In([QuizPoolType.GENERAL, QuizPoolType.BOTH]),
-        visibility: QuizVisibility.PUBLIC,
-        reviewStatus: QuizReviewStatus.ACTIVE,
-      },
+      where: [
+        {
+          question_id: questionId,
+          status: 'ACTIVE',
+          quizPoolType: In([QuizPoolType.GENERAL, QuizPoolType.BOTH]),
+          visibility: QuizVisibility.PUBLIC,
+          reviewStatus: QuizReviewStatus.ACTIVE,
+        },
+        {
+          question_id: questionId,
+          status: 'ACTIVE',
+          quizPoolType: In([QuizPoolType.GENERAL, QuizPoolType.BOTH]),
+          visibility: QuizVisibility.PRIVATE,
+          ownerUserId: userId,
+        },
+      ],
       relations: ['choices', 'category'],
     });
 

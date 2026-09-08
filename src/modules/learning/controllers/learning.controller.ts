@@ -151,8 +151,8 @@ export class LearningController {
 - 서버 내부 오류
     `,
   })
-  findAllQuestions(@Query() query: FindQuestionsQueryDto) {
-    return this.learningService.findAllQuestions(query);
+  findAllQuestions(@Req() req, @Query() query: FindQuestionsQueryDto) {
+    return this.learningService.findAllQuestions(req.user.userId, query);
   }
 
   @Get('questions/recommended')
@@ -210,9 +210,10 @@ export class LearningController {
     `,
   })
   findOneQuestion(
+    @Req() req,
     @Param('questionId', ParseIntPipe) questionId: number,
   ): Promise<QuestionResponseDto> {
-    return this.learningService.findQuestionById(questionId);
+    return this.learningService.findQuestionById(req.user.userId, questionId);
   }
 
   @Post('questions/:questionId/submit')

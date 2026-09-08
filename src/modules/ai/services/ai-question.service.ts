@@ -456,7 +456,7 @@ export class AiQuestionService {
       reward_cash:
         generated.reward_cash ??
         getRewardCashForLevel(metadata.investmentLevel?.investmentLevelId),
-      status: 'INACTIVE',
+      status: 'ACTIVE',
     });
     const question = await this.questionRepository.save(questionEntity);
 
