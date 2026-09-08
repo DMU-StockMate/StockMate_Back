@@ -40,6 +40,7 @@ export class AiLlamaProviderService {
             const lines = event
               .split('\n')
               .map((line) => line.trim())
+              .filter((line) => line && !line.startsWith(':'))
               .filter((line) => line.startsWith('data:'));
 
             for (const line of lines) {
@@ -132,6 +133,12 @@ export class AiLlamaProviderService {
       headers: this.getAuthHeaders(),
       timeout: 110000,
     });
+
+    if (!response.data?.questions) {
+      throw new InternalServerErrorException(
+        response.data?.detail ?? 'AI 문제 생성 실패',
+      );
+    }
 
     return response.data;
   }
