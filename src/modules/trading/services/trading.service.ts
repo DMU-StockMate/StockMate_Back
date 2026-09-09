@@ -21,7 +21,7 @@ import { Holding } from '../entities/holding.entity';
 import { Trade, TradeType } from '../entities/trade.entity';
 import { TradingAccount } from '../entities/trading-account.entity';
 
-const INITIAL_CASH_BALANCE = 10000000;
+const INITIAL_CASH_BALANCE = 30000000;
 
 @Injectable()
 export class TradingService {
@@ -156,6 +156,9 @@ export class TradingService {
       .addSelect('account.cash_balance', 'cashBalance')
       .addSelect('account.seed_money', 'seedMoney')
       .where('user.status = :status', { status: 'ACTIVE' })
+      .andWhere(
+        'account.account_id = (SELECT MAX(latest_account.account_id) FROM simulation_accounts latest_account WHERE latest_account.user_id = account.user_id)',
+      )
       .orderBy('account.total_asset_value', 'DESC')
       .addOrderBy('account.updated_at', 'ASC')
       .limit(limit)
@@ -188,6 +191,9 @@ export class TradingService {
         'growthRate',
       )
       .where('user.status = :status', { status: 'ACTIVE' })
+      .andWhere(
+        'account.account_id = (SELECT MAX(latest_account.account_id) FROM simulation_accounts latest_account WHERE latest_account.user_id = account.user_id)',
+      )
       .andWhere('account.updated_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)')
       .orderBy('growthAmount', 'DESC')
       .addOrderBy('account.total_asset_value', 'DESC')

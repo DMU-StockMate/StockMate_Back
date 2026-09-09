@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, IsString, Length, Matches } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class LoginUserDto {
@@ -8,12 +8,9 @@ export class LoginUserDto {
   @IsNotEmpty({ message: '이메일은 필수입니다.' })
   email: string;
 
-  // 비밀번호
+  // 비밀번호 (기존 비밀번호 확인용이므로 형식 검증은 하지 않음 - bcrypt 비교로 판단)
   @ApiProperty({ example: 'password1234', description: '비밀번호' })
   @IsString({ message: '비밀번호는 문자열이어야 합니다.' })
   @IsNotEmpty({ message: '비밀번호는 필수입니다.' })
-  @Length(4, 20, { message: '비밀번호는 4자 이상 20자 이하로 입력해주세요.' })
-  @Matches(/^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d@$!%*#?&]{8,20}$/, {
-  message: '비밀번호는 8~20자이며, 영문과 숫자를 포함해야 합니다.',})
   password: string;
 }
