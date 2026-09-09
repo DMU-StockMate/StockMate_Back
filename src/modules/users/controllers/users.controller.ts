@@ -12,6 +12,7 @@ import { FindEmailDto } from '../dto/find-email.dto';
 import { LoginUserDto } from '../dto/login-user.dto';
 import { ResetPasswordDto } from '../dto/reset-password.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
+import { WithdrawDto } from '../dto/withdraw.dto';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { UsersService } from '../services/users.service';
 
@@ -143,6 +144,17 @@ export class UsersController {
     @Body() updateUserDto: UpdateUserDto,
   ) {
     return await this.usersService.update(req.user.userId, updateUserDto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('accessToken')
+  @Delete()
+  @ApiOperation({ summary: '회원 탈퇴 (본인)' })
+  @ApiBody({ type: WithdrawDto })
+  @ApiResponse({ status: 200, description: '회원 탈퇴 성공' })
+  @ApiUnauthorizedResponse({ description: '비밀번호가 일치하지 않습니다.' })
+  async withdraw(@Request() req, @Body() withdrawDto: WithdrawDto) {
+    return await this.usersService.withdraw(req.user.userId, withdrawDto.password);
   }
 
 @Post('me/profile-image')
