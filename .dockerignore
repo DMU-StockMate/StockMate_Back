@@ -5,3 +5,10 @@ dist
 .env
 .env.*
 npm-debug.log
+db
+logs
+mysql
+.DS_Store
+.idea
+.code-review-graph
+stockmate_quiz_*.html
