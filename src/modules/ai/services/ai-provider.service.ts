@@ -144,7 +144,7 @@ export class AiLlamaProviderService {
   }
 
   private getAuthHeaders() {
-    const apiKey = this.configService.get<string>('AI_API_KEY');
+    const apiKey = this.configService.get<string>('X-API-KEY');
 
     return apiKey
       ? {
