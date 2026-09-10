@@ -22,6 +22,7 @@ import { TradingService } from '../services/trading.service';
 
 @ApiTags('trading')
 @ApiBearerAuth('accessToken')
+@UseGuards(JwtAuthGuard)
 @Controller('trading')
 export class TradingController {
   constructor(private readonly tradingService: TradingService) {}
@@ -77,6 +78,7 @@ export class TradingController {
 
   @Post('buy')
   @UseGuards(JwtAuthGuard)
+  @Post('buy')
   @ApiOperation({ summary: '매수' })
   @ApiBody({ type: CreateTradeDto })
   @ApiResponse({ status: 201, description: '매수 성공' })

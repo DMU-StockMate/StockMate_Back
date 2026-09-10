@@ -61,6 +61,7 @@ import { NotificationModule } from './modules/notification/notification.module';
     CommunityModule,
     NewsModule,
     NotificationModule,
+    TradingModule,
   ],
 })
 export class AppModule {}
