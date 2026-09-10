@@ -129,9 +129,21 @@ export class AiLlamaProviderService {
 
   private async postQuiz(path: string, context: unknown) {
     const baseUrl = this.getBaseUrl();
+    const startedAt = Date.now();
     const response = await axios.post(`${baseUrl}${path}`, context, {
       headers: this.getAuthHeaders(),
+      timeout: 300_000,
+    }).catch((error: any) => {
+      console.error(
+        `AI quiz request failed path=${path} elapsedMs=${Date.now() - startedAt} status=${error.response?.status ?? 'none'} code=${error.code ?? 'none'} message=${error.message}`,
+      );
+
+      throw error;
     });
+
+    console.log(
+      `AI quiz request completed path=${path} elapsedMs=${Date.now() - startedAt}`,
+    );
 
     if (!response.data?.questions) {
       throw new InternalServerErrorException(

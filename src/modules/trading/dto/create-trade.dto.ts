@@ -1,31 +1,68 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsEnum,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+  ValidateIf,
+} from 'class-validator';
+import { OrderSide, OrderType } from '../entities/investment-order.entity';
 
 export class CreateTradeDto {
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: '005930',
-    description: '종목 코드',
+    description: 'Stock code. Legacy ticker is still accepted.',
   })
-  @IsString({ message: '종목 코드는 문자열이어야 합니다.' })
-  ticker!: string;
+  @IsOptional()
+  @IsString()
+  stockCode?: string;
+
+  @ApiPropertyOptional({
+    example: '005930',
+    description: 'Legacy stock code field. stockCode takes precedence.',
+  })
+  @IsOptional()
+  @IsString()
+  ticker?: string;
 
   @ApiProperty({
     example: 10,
-    description: '주문 수량',
+    description: 'Order quantity',
   })
   @Type(() => Number)
-  @IsInt({ message: '주문 수량은 정수여야 합니다.' })
-  @Min(1, { message: '주문 수량은 1 이상이어야 합니다.' })
+  @IsInt({ message: 'quantity must be an integer.' })
+  @Min(1, { message: 'quantity must be at least 1.' })
   quantity!: number;
 
   @ApiPropertyOptional({
-    example: 72000,
-    description: '주문 가격입니다. 생략하면 최신 종가로 체결합니다.',
+    enum: OrderType,
+    default: OrderType.MARKET,
+    description: 'Order type. Defaults to MARKET for legacy clients.',
   })
   @IsOptional()
+  @IsEnum(OrderType)
+  orderType?: OrderType;
+
+  @ApiPropertyOptional({
+    enum: OrderSide,
+    description:
+      'Order side. Existing /trading/buy and /trading/sell routes decide the side.',
+  })
+  @IsOptional()
+  @IsEnum(OrderSide)
+  side?: OrderSide;
+
+  @ApiPropertyOptional({
+    example: 68000,
+    description:
+      'Limit price for LIMIT orders only. MARKET orders ignore this value.',
+  })
+  @ValidateIf((dto: CreateTradeDto) => dto.orderType === OrderType.LIMIT)
   @Type(() => Number)
-  @IsNumber({}, { message: '주문 가격은 숫자여야 합니다.' })
-  @Min(1, { message: '주문 가격은 1 이상이어야 합니다.' })
+  @IsNumber({}, { message: 'price must be a number.' })
+  @Min(1, { message: 'price must be greater than 0.' })
   price?: number;
 }

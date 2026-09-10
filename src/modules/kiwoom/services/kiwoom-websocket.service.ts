@@ -22,6 +22,10 @@ export class KiwoomWebSocketService implements OnModuleInit, OnModuleDestroy {
 
   private readonly subscribedStocks = new Set<string>();
 
+  private readonly priceListeners = new Set<
+    (stockCode: string, price: number) => void | Promise<void>
+  >();
+
   private isManualClosed = false;
 
   constructor(
@@ -144,6 +148,16 @@ export class KiwoomWebSocketService implements OnModuleInit, OnModuleDestroy {
     return this.subscribedStocks.has(stockCode);
   }
 
+  registerPriceListener(
+    listener: (stockCode: string, price: number) => void | Promise<void>,
+  ) {
+    this.priceListeners.add(listener);
+
+    return () => {
+      this.priceListeners.delete(listener);
+    };
+  }
+
   private async sendLogin() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return;
@@ -226,14 +240,26 @@ export class KiwoomWebSocketService implements OnModuleInit, OnModuleDestroy {
         continue;
       }
 
-      this.currentPrices.set(stockCode, Math.abs(price));
+      const currentPrice = Math.abs(price);
+
+      this.currentPrices.set(stockCode, currentPrice);
 
       await this.redis.set(
         `stock:price:${stockCode}`,
-        String(Math.abs(price)),
+        String(currentPrice),
         'EX',
         60,
       );
+
+      for (const listener of this.priceListeners) {
+        void Promise.resolve(listener(stockCode, currentPrice)).catch(
+          (error: unknown) => {
+            this.logger.warn(
+              `현재가 listener 처리 실패: ${stockCode} ${String(error)}`,
+            );
+          },
+        );
+      }
       this.logger.log(`현재가 갱신: ${stockCode} = ${Math.abs(price)}`);
     }
   }

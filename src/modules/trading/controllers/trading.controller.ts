@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Post,
   Query,
   Request,
@@ -50,6 +51,14 @@ export class TradingController {
     return this.tradingService.findTrades(req.user.userId, query);
   }
 
+  @Get('orders')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Order list' })
+  @ApiResponse({ status: 200, description: 'Order list retrieved' })
+  findOrders(@Request() req) {
+    return this.tradingService.findOrders(req.user.userId);
+  }
+
   @Get('rankings/assets')
   @ApiOperation({ summary: '자산 랭킹 조회' })
   @ApiResponse({ status: 200, description: '자산 랭킹 조회 성공' })
@@ -80,5 +89,13 @@ export class TradingController {
   @ApiResponse({ status: 201, description: '매도 성공' })
   sell(@Request() req, @Body() dto: CreateTradeDto) {
     return this.tradingService.sell(req.user.userId, dto);
+  }
+
+  @Post('orders/:orderId/cancel')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Cancel pending order' })
+  @ApiResponse({ status: 201, description: 'Pending order cancelled' })
+  cancelOrder(@Request() req, @Param('orderId') orderId: string) {
+    return this.tradingService.cancelOrder(req.user.userId, orderId);
   }
 }
