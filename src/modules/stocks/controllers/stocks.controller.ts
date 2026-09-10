@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  MessageEvent,
+  Param,
+  Post,
+  Query,
+  Sse,
+} from '@nestjs/common';
+import { Observable } from 'rxjs';
 import {
   ApiBadRequestResponse,
   ApiBody,
@@ -6,6 +16,7 @@ import {
   ApiNotFoundResponse,
   ApiOperation,
   ApiParam,
+  ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -299,13 +310,13 @@ export class StocksController {
   }
 
   @Get(':ticker/financials')
-  @ApiOperation({ summary: '재무 정보 조회' })
+  @ApiOperation({ summary: '재무 정보 조회 (DART 핵심 재무 요약)' })
   @ApiParam({
     name: 'ticker',
     example: '005930',
     description: '종목 코드',
   })
-  @ApiResponse({ status: 501, description: '재무 정보 테이블 미구현' })
+  @ApiResponse({ status: 200, description: '재무 정보 조회 성공' })
   findFinancials(@Param('ticker') ticker: string) {
     return this.stocksService.findFinancials(ticker);
   }
@@ -320,6 +331,45 @@ export class StocksController {
   @ApiResponse({ status: 200, description: '투자 지표 조회 성공' })
   findIndicators(@Param('ticker') ticker: string) {
     return this.stocksService.findIndicators(ticker);
+  }
+
+  @Get(':ticker/investor-trend')
+  @ApiOperation({
+    summary: '투자자 동향 조회 (외국인/기관/개인 순매수)',
+    description: '키움 REST API ka10059(종목별투자자기관별요청)를 이용해 조회합니다.',
+  })
+  @ApiParam({
+    name: 'ticker',
+    example: '005930',
+    description: '종목 코드',
+  })
+  @ApiQuery({
+    name: 'date',
+    required: false,
+    example: '20260906',
+    description: '조회 일자 (YYYYMMDD, 기본값: 오늘)',
+  })
+  @ApiResponse({ status: 200, description: '투자자 동향 조회 성공' })
+  findInvestorTrend(
+    @Param('ticker') ticker: string,
+    @Query('date') date?: string,
+  ) {
+    return this.stocksService.findInvestorTrend(ticker, date);
+  }
+
+  @Get(':ticker/revenue-composition')
+  @ApiOperation({
+    summary: '주요제품 매출구성 조회',
+    description: '와이즈리포트 기업개요 페이지의 주요제품별 매출 비중을 조회합니다.',
+  })
+  @ApiParam({
+    name: 'ticker',
+    example: '005930',
+    description: '종목 코드',
+  })
+  @ApiResponse({ status: 200, description: '주요제품 매출구성 조회 성공' })
+  findRevenueComposition(@Param('ticker') ticker: string) {
+    return this.stocksService.findRevenueComposition(ticker);
   }
 
   @Get(':ticker/dividends')
@@ -375,5 +425,16 @@ export class StocksController {
     return this.stocksService.getCurrentPrice(ticker);
   }
 
-  
+  @Sse(':ticker/price/stream')
+  @ApiOperation({ summary: '종목 실시간 가격 틱 스트림 (SSE)' })
+  @ApiParam({
+    name: 'ticker',
+    example: '005930',
+    description: '종목 코드',
+  })
+  streamCurrentPrice(
+    @Param('ticker') ticker: string,
+  ): Observable<MessageEvent> {
+    return this.stocksService.streamCurrentPrice(ticker);
+  }
 }

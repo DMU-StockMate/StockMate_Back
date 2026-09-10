@@ -5,6 +5,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
+import { EventEmitter } from 'events';
 
 import WebSocket from 'ws';
 
@@ -12,8 +13,16 @@ import { KiwoomAuthService } from './kiwoom-auth.service';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import Redis from 'ioredis';
 
+export interface StockTick {
+  stockCode: string;
+  price: number;
+}
+
 @Injectable()
-export class KiwoomWebSocketService implements OnModuleInit, OnModuleDestroy {
+export class KiwoomWebSocketService
+  extends EventEmitter
+  implements OnModuleInit, OnModuleDestroy
+{
   private readonly logger = new Logger(KiwoomWebSocketService.name);
 
   private ws: WebSocket | null = null;
@@ -32,7 +41,11 @@ export class KiwoomWebSocketService implements OnModuleInit, OnModuleDestroy {
     private readonly kiwoomAuthService: KiwoomAuthService,
     @InjectRedis()
     private readonly redis: Redis,
-  ) {}
+  ) {
+    super();
+    // 종목별 스트림 구독자가 늘어도 경고 없이 emit할 수 있도록 상한을 넉넉히 둠
+    this.setMaxListeners(0);
+  }
 
   async onModuleInit() {
     try {
@@ -240,19 +253,14 @@ export class KiwoomWebSocketService implements OnModuleInit, OnModuleDestroy {
         continue;
       }
 
-      const currentPrice = Math.abs(price);
+      const absPrice = Math.abs(price);
 
-      this.currentPrices.set(stockCode, currentPrice);
+      this.currentPrices.set(stockCode, absPrice);
 
-      await this.redis.set(
-        `stock:price:${stockCode}`,
-        String(currentPrice),
-        'EX',
-        60,
-      );
+      await this.redis.set(`stock:price:${stockCode}`, String(absPrice), 'EX', 60);
 
       for (const listener of this.priceListeners) {
-        void Promise.resolve(listener(stockCode, currentPrice)).catch(
+        void Promise.resolve(listener(stockCode, absPrice)).catch(
           (error: unknown) => {
             this.logger.warn(
               `현재가 listener 처리 실패: ${stockCode} ${String(error)}`,
@@ -260,7 +268,9 @@ export class KiwoomWebSocketService implements OnModuleInit, OnModuleDestroy {
           },
         );
       }
-      this.logger.log(`현재가 갱신: ${stockCode} = ${Math.abs(price)}`);
+
+      this.logger.log(`현재가 갱신: ${stockCode} = ${absPrice}`);
+      this.emit('tick', { stockCode, price: absPrice } satisfies StockTick);
     }
   }
 

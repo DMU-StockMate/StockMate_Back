@@ -10,9 +10,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { KiwoomWebSocketService } from '../../kiwoom/services/kiwoom-websocket.service';
 import { Stock, StockStatus } from '../../stocks/entities/stock.entity';
+import { NotificationType } from '../../notification/entities/notification.entity';
+import { NotificationService } from '../../notification/services/notification.service';
 import { CreateTradeDto } from '../dto/create-trade.dto';
 import { RankingQueryDto } from '../dto/ranking-query.dto';
 import { TradeHistoryQueryDto } from '../dto/trade-history-query.dto';
+import { AccountAssetSnapshot } from '../entities/account-asset-snapshot.entity';
 import {
   AccountCashHistory,
   CashHistoryType,
@@ -27,7 +30,7 @@ import {
 import { Trade, TradeType } from '../entities/trade.entity';
 import { TradingAccount } from '../entities/trading-account.entity';
 
-const INITIAL_CASH_BALANCE = 10000000;
+const INITIAL_CASH_BALANCE = 30000000;
 
 @Injectable()
 export class TradingService implements OnModuleInit {
@@ -53,6 +56,11 @@ export class TradingService implements OnModuleInit {
     private readonly stockRepository: Repository<Stock>,
 
     private readonly kiwoomWebSocketService: KiwoomWebSocketService,
+
+    @InjectRepository(AccountAssetSnapshot)
+    private readonly assetSnapshotRepository: Repository<AccountAssetSnapshot>,
+
+    private readonly notificationService: NotificationService,
   ) {}
 
   onModuleInit() {
@@ -91,6 +99,32 @@ export class TradingService implements OnModuleInit {
       averagePrice: holding.avgBuyPrice,
       updatedAt: holding.updatedAt,
     }));
+  }
+
+  async findAssetHistory(userId: number, days: number) {
+    const account = await this.ensureAccount(userId);
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+
+    const snapshots = await this.assetSnapshotRepository.find({
+      where: {
+        accountId: account.accountId,
+      },
+      order: {
+        snapshotDate: 'ASC',
+      },
+    });
+
+    const sinceDate = since.toISOString().slice(0, 10);
+
+    return snapshots
+      .filter((snapshot) => snapshot.snapshotDate >= sinceDate)
+      .map((snapshot) => ({
+        date: snapshot.snapshotDate,
+        cashBalance: snapshot.cashBalance,
+        stockValue: snapshot.stockValue,
+        totalAssetValue: snapshot.totalAssetValue,
+      }));
   }
 
   async findTrades(userId: number, query: TradeHistoryQueryDto) {
@@ -139,6 +173,9 @@ export class TradingService implements OnModuleInit {
       .addSelect('account.cash_balance', 'cashBalance')
       .addSelect('account.seed_money', 'seedMoney')
       .where('user.status = :status', { status: 'ACTIVE' })
+      .andWhere(
+        'account.account_id = (SELECT MAX(latest_account.account_id) FROM simulation_accounts latest_account WHERE latest_account.user_id = account.user_id)',
+      )
       .orderBy('account.total_asset_value', 'DESC')
       .addOrderBy('account.updated_at', 'ASC')
       .limit(limit)
@@ -174,6 +211,9 @@ export class TradingService implements OnModuleInit {
         'growthRate',
       )
       .where('user.status = :status', { status: 'ACTIVE' })
+      .andWhere(
+        'account.account_id = (SELECT MAX(latest_account.account_id) FROM simulation_accounts latest_account WHERE latest_account.user_id = account.user_id)',
+      )
       .andWhere('account.updated_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)')
       .orderBy('growthAmount', 'DESC')
       .addOrderBy('account.total_asset_value', 'DESC')
@@ -193,11 +233,15 @@ export class TradingService implements OnModuleInit {
   }
 
   async buy(userId: number, dto: CreateTradeDto) {
-    return this.placeOrder(userId, dto, OrderSide.BUY);
+    const result = await this.placeOrder(userId, dto, OrderSide.BUY);
+    await this.notifyIfFilled(userId, result);
+    return result;
   }
 
   async sell(userId: number, dto: CreateTradeDto) {
-    return this.placeOrder(userId, dto, OrderSide.SELL);
+    const result = await this.placeOrder(userId, dto, OrderSide.SELL);
+    await this.notifyIfFilled(userId, result);
+    return result;
   }
 
   async cancelOrder(userId: number, orderId: string) {
@@ -251,7 +295,8 @@ export class TradingService implements OnModuleInit {
 
     for (const order of pendingOrders) {
       if (this.canFillLimitOrder(order, currentPrice)) {
-        await this.fillPendingOrder(order.orderId, currentPrice);
+        const result = await this.fillPendingOrder(order.orderId, currentPrice);
+        await this.notifyIfFilled(order.userId, result);
       }
     }
   }
@@ -283,6 +328,40 @@ export class TradingService implements OnModuleInit {
         totalAssetValue: account.totalAssetValue,
       };
     });
+  }
+
+  private async notifyIfFilled(
+    userId: number,
+    result: ReturnType<TradingService['toOrderPlacementResponse']> | null,
+  ) {
+    if (!result?.order || result.order.status !== OrderStatus.FILLED) {
+      return;
+    }
+
+    const trade = result.trade as
+      | {
+          tradeType?: TradeType;
+          ticker?: string;
+          companyName?: string;
+          quantity?: number;
+        }
+      | null
+      | undefined;
+
+    if (!trade?.tradeType) {
+      return;
+    }
+
+    const isBuy = trade.tradeType === TradeType.BUY;
+    const action = isBuy ? '매수' : '매도';
+
+    await this.notificationService.create(
+      userId,
+      NotificationType.TRADE_EXECUTED,
+      `${action} 체결 완료`,
+      `${trade.companyName ?? result.order.stockCode} ${trade.quantity ?? result.order.quantity}주 ${action}가 체결되었습니다.`,
+      `/trade/stocks/${trade.ticker ?? result.order.stockCode}`,
+    );
   }
 
   private async placeOrder(

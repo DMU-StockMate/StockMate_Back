@@ -18,9 +18,11 @@ import { QuizCategoryDetail } from 'src/modules/learning/entities/quiz-category-
 import { QuizQuestionDetail } from 'src/modules/learning/entities/quiz-question-detail.entity';
 import { AiQuestionService } from './services/ai-question.service';
 import { AiQuestionController } from './controllers/ai-question.controller';
+import { NotificationModule } from 'src/modules/notification/notification.module';
 
 @Module({
   imports: [
+    NotificationModule,
     TypeOrmModule.forFeature([
       AiChatSession,
       AiChatMessage,

@@ -14,6 +14,7 @@ import { EmailVerificationService } from '../../email/services/email-verificatio
 
 import * as bcrypt from 'bcryptjs';
 import { UserRole } from 'src/modules/enums/role-enum';
+import { UserStatus } from 'src/modules/enums/user-status.enum';
 import { CheckEmailDto } from '../dto/check-email.dto';
 import { CheckNickNameDto } from '../dto/check-nickname.dto';
 import { CreateUserDto } from '../dto/create-user.dto';
@@ -280,5 +281,24 @@ async deleteProfileImage(
   };
 }
 
-// 회원 탈퇴 기능 추가
+async withdraw(user_id: number, password: string): Promise<{ message: string }> {
+  const user = await this.userRepository.findOne({
+    where: { user_id },
+    select: ['user_id', 'password_hash'],
+  });
+
+  if (!user) {
+    throw new NotFoundException('사용자를 찾을 수 없습니다.');
+  }
+
+  const isMatch = await bcrypt.compare(password, user.password_hash);
+  if (!isMatch) {
+    throw new UnauthorizedException('비밀번호가 일치하지 않습니다.');
+  }
+
+  await this.userRepository.update(user_id, { status: UserStatus.DELETED });
+  await this.redis.del(`refresh_token:${user_id}`);
+
+  return { message: '회원 탈퇴가 완료되었습니다.' };
+}
 }

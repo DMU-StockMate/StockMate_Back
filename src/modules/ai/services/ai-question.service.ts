@@ -21,6 +21,8 @@ import {
   QuizVisibility,
 } from '../../learning/entities/quiz-question.entity';
 import { TopicName } from '../../learning/entities/topic-name.entity';
+import { NotificationType } from '../../notification/entities/notification.entity';
+import { NotificationService } from '../../notification/services/notification.service';
 import { GeneratePromptQuestionRequestDto } from '../dto/generate-prompt-question-request.dto';
 import { GenerateQuestionRequestDto } from '../dto/generate-question-request.dto';
 import { AiLlamaProviderService } from './ai-provider.service';
@@ -80,6 +82,8 @@ export class AiQuestionService {
     private readonly questionDetailRepository: Repository<QuizQuestionDetail>,
 
     private readonly aiProvider: AiLlamaProviderService,
+
+    private readonly notificationService: NotificationService,
   ) {}
 
   async generateQuestion(userId: number, dto: GenerateQuestionRequestDto) {
@@ -392,6 +396,14 @@ export class AiQuestionService {
       generatedBatch.questions.map((generated) =>
         this.saveGeneratedQuestion(generated, metadata),
       ),
+    );
+
+    await this.notificationService.create(
+      metadata.userId,
+      NotificationType.QUIZ_GENERATED,
+      '문제 생성 완료',
+      `${metadata.topic.topicName} 관련 문제 ${questions.length}개가 생성되었습니다.`,
+      '/learn/ai-history',
     );
 
     return {
