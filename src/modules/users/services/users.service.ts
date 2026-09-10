@@ -13,6 +13,7 @@ import { Not, Repository } from 'typeorm';
 import { EmailVerificationService } from '../../email/services/email-verification.service';
 
 import * as bcrypt from 'bcryptjs';
+import { randomUUID } from 'crypto';
 import { UserRole } from 'src/modules/enums/role-enum';
 import { UserStatus } from 'src/modules/enums/user-status.enum';
 import { CheckEmailDto } from '../dto/check-email.dto';
@@ -20,6 +21,7 @@ import { CheckNickNameDto } from '../dto/check-nickname.dto';
 import { CreateUserDto } from '../dto/create-user.dto';
 import { LoginUserDto } from '../dto/login-user.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
+import { WithdrawDto } from '../dto/withdraw.dto';
 import { User } from '../entities/user.entity';
 
 @Injectable()
@@ -162,12 +164,85 @@ export class UsersService {
       throw new UnauthorizedException('정지 기간입니다.');
     }
 
-    const payload = { sub: user.user_id, email: user.email, role: user.role };
+    return this.issueTokens(user.user_id, user.email, user.role);
+  }
+
+  async googleLogin(idToken: string): Promise<{ accessToken: string; refreshToken: string }> {
+    const googleUser = await this.verifyGoogleIdToken(idToken);
+    let user = await this.userRepository.findOne({ where: { email: googleUser.email } });
+
+    if (!user) {
+      user = await this.userRepository.save(this.userRepository.create({
+        email: googleUser.email,
+        password_hash: await bcrypt.hash(randomUUID(), 10),
+        name: googleUser.name || googleUser.email.split('@')[0],
+        nickname: await this.createGoogleNickname(googleUser.email),
+        phone: '',
+        role: UserRole.USER,
+        profile_image_url: googleUser.picture ?? null,
+      }));
+    } else if (user.status === UserStatus.DELETED) {
+      await this.userRepository.update(user.user_id, {
+        status: UserStatus.ACTIVE,
+        name: user.name || googleUser.name || googleUser.email.split('@')[0],
+        profile_image_url: user.profile_image_url ?? googleUser.picture ?? null,
+      });
+      user = await this.findOne(user.user_id);
+    }
+
+    if (user.status === 'BANNED') {
+      throw new UnauthorizedException('정지된 계정입니다.');
+    }
+
+    if (user.ban_until && new Date() < user.ban_until) {
+      throw new UnauthorizedException('정지 기간입니다.');
+    }
+
+    return this.issueTokens(user.user_id, user.email, user.role);
+  }
+
+  private async verifyGoogleIdToken(idToken: string): Promise<{ email: string; name: string; picture?: string }> {
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    if (!clientId) throw new BadRequestException('GOOGLE_CLIENT_ID가 설정되지 않았습니다.');
+
+    const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
+    if (!res.ok) throw new UnauthorizedException('구글 로그인 인증에 실패했습니다.');
+
+    const payload = await res.json() as {
+      aud?: string;
+      email?: string;
+      email_verified?: string;
+      name?: string;
+      picture?: string;
+    };
+
+    if (payload.aud !== clientId || payload.email_verified !== 'true' || !payload.email) {
+      throw new UnauthorizedException('구글 로그인 인증에 실패했습니다.');
+    }
+
+    return {
+      email: payload.email,
+      name: payload.name ?? '',
+      picture: payload.picture,
+    };
+  }
+
+  private async createGoogleNickname(email: string): Promise<string> {
+    const base = email.split('@')[0].replace(/[^a-zA-Z0-9가-힣]/g, '').slice(0, 12) || 'google';
+    for (let i = 0; i < 10; i += 1) {
+      const nickname = i === 0 ? base : `${base}${i}`;
+      const exists = await this.userRepository.findOne({ where: { nickname } });
+      if (!exists) return nickname;
+    }
+    return `google${randomUUID().slice(0, 8)}`;
+  }
+
+  private async issueTokens(userId: number, email: string, role: UserRole) {
+    const payload = { sub: userId, email, role };
     const accessToken = this.jwtService.sign(payload, { expiresIn: '1h' });
     const refreshToken = this.jwtService.sign(payload, { expiresIn: '7d' });
 
-    //await this.userRepository.update(user.userId, { refreshToken });
-    await this.saveRefreshToken(user.user_id, refreshToken);
+    await this.saveRefreshToken(userId, refreshToken);
 
     return { accessToken, refreshToken };
   }
@@ -281,19 +356,29 @@ async deleteProfileImage(
   };
 }
 
-async withdraw(user_id: number, password: string): Promise<{ message: string }> {
+async withdraw(user_id: number, withdrawDto: WithdrawDto): Promise<{ message: string }> {
   const user = await this.userRepository.findOne({
     where: { user_id },
-    select: ['user_id', 'password_hash'],
+    select: ['user_id', 'email', 'password_hash'],
   });
 
   if (!user) {
     throw new NotFoundException('사용자를 찾을 수 없습니다.');
   }
 
-  const isMatch = await bcrypt.compare(password, user.password_hash);
-  if (!isMatch) {
-    throw new UnauthorizedException('비밀번호가 일치하지 않습니다.');
+  if (withdrawDto.googleIdToken) {
+    const googleUser = await this.verifyGoogleIdToken(withdrawDto.googleIdToken);
+    if (googleUser.email !== user.email) {
+      throw new UnauthorizedException('구글 계정 정보가 일치하지 않습니다.');
+    }
+  } else {
+    if (!withdrawDto.password) {
+      throw new UnauthorizedException('비밀번호가 일치하지 않습니다.');
+    }
+    const isMatch = await bcrypt.compare(withdrawDto.password, user.password_hash);
+    if (!isMatch) {
+      throw new UnauthorizedException('비밀번호가 일치하지 않습니다.');
+    }
   }
 
   await this.userRepository.update(user_id, { status: UserStatus.DELETED });

@@ -9,6 +9,7 @@ import { CheckEmailDto } from '../dto/check-email.dto';
 import { CheckNickNameDto } from '../dto/check-nickname.dto';
 import { CreateUserDto } from '../dto/create-user.dto';
 import { FindEmailDto } from '../dto/find-email.dto';
+import { GoogleLoginDto } from '../dto/google-login.dto';
 import { LoginUserDto } from '../dto/login-user.dto';
 import { ResetPasswordDto } from '../dto/reset-password.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
@@ -99,6 +100,14 @@ export class UsersController {
     return await this.usersService.login(loginUserDto);
   }
 
+  @Post('google-login')
+  @ApiOperation({ summary: '구글 로그인' })
+  @ApiBody({ type: GoogleLoginDto })
+  @ApiResponse({ status: 200, description: '구글 로그인 성공, JWT 토큰 반환' })
+  async googleLogin(@Body() googleLoginDto: GoogleLoginDto) {
+    return await this.usersService.googleLogin(googleLoginDto.idToken);
+  }
+
   @Post('signup')
   @ApiOperation({ summary: '회원가입' })
   @ApiBody({ type: CreateUserDto })
@@ -153,7 +162,7 @@ export class UsersController {
   @ApiResponse({ status: 200, description: '회원 탈퇴 성공' })
   @ApiUnauthorizedResponse({ description: '비밀번호가 일치하지 않습니다.' })
   async withdraw(@Request() req, @Body() withdrawDto: WithdrawDto) {
-    return await this.usersService.withdraw(req.user.userId, withdrawDto.password);
+    return await this.usersService.withdraw(req.user.userId, withdrawDto);
   }
 
 @Post('me/profile-image')
