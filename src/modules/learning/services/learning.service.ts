@@ -25,6 +25,7 @@ import {
   QuizPoolType,
   QuizQuestion,
   QuizReviewStatus,
+  QuizSourceType,
   QuizVisibility,
 } from '../entities/quiz-question.entity';
 
@@ -395,7 +396,8 @@ export class LearningService {
     }
 
     const isCorrect = selectedChoice.is_correct;
-    const reward = isCorrect ? question.reward_cash : 0;
+    const reward =
+      isCorrect && this.isRewardableQuestion(question) ? question.reward_cash : 0;
 
     const previousAttempt = await this.attemptRepository.findOne({
       where: { user_id: userId, question_id: questionId },
@@ -907,6 +909,15 @@ export class LearningService {
   private isRecentAttempt(attempt: QuizAttempt) {
     const sevenDays = 7 * 24 * 60 * 60 * 1000;
     return Date.now() - new Date(attempt.solved_at).getTime() <= sevenDays;
+  }
+
+  private isRewardableQuestion(question: QuizQuestion) {
+    return (
+      question.visibility === QuizVisibility.PUBLIC &&
+      question.reviewStatus === QuizReviewStatus.ACTIVE &&
+      question.status === 'ACTIVE' &&
+      question.sourceType === QuizSourceType.DEFAULT
+    );
   }
 
   private toStrategy(mode: RecommendationMode) {

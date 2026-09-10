@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Post,
   Query,
   Request,
@@ -22,7 +23,6 @@ import { TradingService } from '../services/trading.service';
 
 @ApiTags('trading')
 @ApiBearerAuth('accessToken')
-@UseGuards(JwtAuthGuard)
 @Controller('trading')
 export class TradingController {
   constructor(private readonly tradingService: TradingService) {}
@@ -49,6 +49,14 @@ export class TradingController {
   @ApiResponse({ status: 200, description: '거래 내역 조회 성공' })
   findTrades(@Request() req, @Query() query: TradeHistoryQueryDto) {
     return this.tradingService.findTrades(req.user.userId, query);
+  }
+
+  @Get('orders')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Order list' })
+  @ApiResponse({ status: 200, description: 'Order list retrieved' })
+  findOrders(@Request() req) {
+    return this.tradingService.findOrders(req.user.userId);
   }
 
   @Get('asset-history')
@@ -78,7 +86,6 @@ export class TradingController {
 
   @Post('buy')
   @UseGuards(JwtAuthGuard)
-  @Post('buy')
   @ApiOperation({ summary: '매수' })
   @ApiBody({ type: CreateTradeDto })
   @ApiResponse({ status: 201, description: '매수 성공' })
@@ -93,5 +100,13 @@ export class TradingController {
   @ApiResponse({ status: 201, description: '매도 성공' })
   sell(@Request() req, @Body() dto: CreateTradeDto) {
     return this.tradingService.sell(req.user.userId, dto);
+  }
+
+  @Post('orders/:orderId/cancel')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Cancel pending order' })
+  @ApiResponse({ status: 201, description: 'Pending order cancelled' })
+  cancelOrder(@Request() req, @Param('orderId') orderId: string) {
+    return this.tradingService.cancelOrder(req.user.userId, orderId);
   }
 }

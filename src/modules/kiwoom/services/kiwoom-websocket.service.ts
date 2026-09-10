@@ -31,6 +31,10 @@ export class KiwoomWebSocketService
 
   private readonly subscribedStocks = new Set<string>();
 
+  private readonly priceListeners = new Set<
+    (stockCode: string, price: number) => void | Promise<void>
+  >();
+
   private isManualClosed = false;
 
   constructor(
@@ -157,6 +161,16 @@ export class KiwoomWebSocketService
     return this.subscribedStocks.has(stockCode);
   }
 
+  registerPriceListener(
+    listener: (stockCode: string, price: number) => void | Promise<void>,
+  ) {
+    this.priceListeners.add(listener);
+
+    return () => {
+      this.priceListeners.delete(listener);
+    };
+  }
+
   private async sendLogin() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return;
@@ -244,6 +258,17 @@ export class KiwoomWebSocketService
       this.currentPrices.set(stockCode, absPrice);
 
       await this.redis.set(`stock:price:${stockCode}`, String(absPrice), 'EX', 60);
+
+      for (const listener of this.priceListeners) {
+        void Promise.resolve(listener(stockCode, absPrice)).catch(
+          (error: unknown) => {
+            this.logger.warn(
+              `현재가 listener 처리 실패: ${stockCode} ${String(error)}`,
+            );
+          },
+        );
+      }
+
       this.logger.log(`현재가 갱신: ${stockCode} = ${absPrice}`);
       this.emit('tick', { stockCode, price: absPrice } satisfies StockTick);
     }

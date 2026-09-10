@@ -555,17 +555,18 @@ export class StocksService {
   }
 
   async findLatestDailyPrice(ticker: string) {
-    const { stock, latestPrice, previousPrice, change } =
-      await this.findLatestAndPreviousDailyPrice(ticker);
+    const snapshot = await this.resolveCurrentPriceSnapshot(ticker);
 
     return {
-      stockId: stock.stockId,
-      ticker: stock.ticker,
-      companyName: stock.companyName,
-      price: latestPrice,
-      previousClosePrice: previousPrice?.closePrice ?? null,
-      changePrice: change.changePrice,
-      changeRate: change.changeRate,
+      stockId: snapshot.stock.stockId,
+      ticker: snapshot.stock.ticker,
+      companyName: snapshot.stock.companyName,
+      currentPrice: snapshot.currentPrice,
+      realtimePrice: snapshot.realtimePrice,
+      price: snapshot.latestPrice,
+      previousClosePrice: snapshot.previousClosePrice,
+      changePrice: snapshot.changePrice,
+      changeRate: snapshot.changeRate,
     };
   }
 
@@ -577,7 +578,7 @@ export class StocksService {
         ticker: stock.ticker,
         requireLatestPrice: true,
         latestPriceNotFoundMessage:
-          '종목 시세를 찾을 수 없습니다.',
+          '醫낅ぉ ?쒖꽭瑜?李얠쓣 ???놁뒿?덈떎.',
       });
 
     return {

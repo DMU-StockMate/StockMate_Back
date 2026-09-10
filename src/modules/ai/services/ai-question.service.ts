@@ -26,7 +26,6 @@ import { NotificationService } from '../../notification/services/notification.se
 import { GeneratePromptQuestionRequestDto } from '../dto/generate-prompt-question-request.dto';
 import { GenerateQuestionRequestDto } from '../dto/generate-question-request.dto';
 import { AiLlamaProviderService } from './ai-provider.service';
-import { getRewardCashForLevel } from '../../learning/constants/reward-tier';
 
 type QuestionType = 'MULTIPLE_CHOICE' | 'OX';
 
@@ -453,9 +452,7 @@ export class AiQuestionService {
       question_type: generated.question_type,
       question_text: generated.question_text,
       explanation: generated.explanation,
-      reward_cash:
-        generated.reward_cash ??
-        getRewardCashForLevel(metadata.investmentLevel?.investmentLevelId),
+      reward_cash: 0,
       status: 'ACTIVE',
     });
     const question = await this.questionRepository.save(questionEntity);

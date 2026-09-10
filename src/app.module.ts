@@ -9,12 +9,12 @@ import { InvestmentProfileModule } from './modules/investment-profile/investment
 import { KrxModule } from './modules/krx/krx.module';
 import { LearningModule } from './modules/learning/learning.module';
 import { NewsModule } from './modules/news/news.module';
-import { NotificationModule } from './modules/notification/notification.module';
 import { StocksModule } from './modules/stocks/stocks.module';
 import { TradingModule } from './modules/trading/trading.module';
 import { AdminModule } from './modules/users/admin.module';
 import { UsersModule } from './modules/users/users.module';
 import { WatchlistModule } from './modules/watchlist/watchlist.module';
+import { NotificationModule } from './modules/notification/notification.module';
 
 @Module({
   imports: [
