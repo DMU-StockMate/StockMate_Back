@@ -141,16 +141,23 @@ export class WatchlistService {
     const previousClosePrice = this.stockPriceSnapshotService.toNumberOrNull(
       latestPrice?.closePrice,
     );
+    if (price === null) {
+      return {
+        watchlistId,
+        stockCode,
+        ticker: stockCode,
+        price: null,
+        currentPrice: null,
+        previousClosePrice,
+        changePrice: null,
+        changeRate: null,
+      };
+    }
+
     const change = this.stockPriceSnapshotService.calculatePriceChange(
       price,
       previousClosePrice,
     );
-
-    if (price === null) {
-      throw new NotFoundException(
-        '현재가 정보가 없습니다. 먼저 관심 종목 실시간 구독을 요청해야 합니다.',
-      );
-    }
 
     return {
       watchlistId,

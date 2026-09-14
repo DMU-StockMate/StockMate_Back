@@ -7,9 +7,15 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { UserStatus } from 'src/modules/enums/user-status.enum'; 
+import { UserStatus } from 'src/modules/enums/user-status.enum';
 import { UserRole } from 'src/modules/enums/role-enum';
 import { InvestmentLevel } from 'src/modules/learning/entities/investment-level.entity';
+
+export enum UserAuthProvider {
+  LOCAL = 'LOCAL',
+  GOOGLE = 'GOOGLE',
+  BOTH = 'BOTH',
+}
 
 @Entity('users')
 export class User {
@@ -31,7 +37,15 @@ export class User {
   @Column({ type: 'varchar', length: 20 })
   phone: string;
 
-  //enum 
+  @Column({
+    type: 'enum',
+    enum: UserAuthProvider,
+    name: 'auth_provider',
+    default: UserAuthProvider.LOCAL,
+  })
+  auth_provider: UserAuthProvider;
+
+  //enum
   @Column({
     type: 'enum',
     enum: UserRole,
@@ -54,7 +68,7 @@ export class User {
   })
   ban_until: Date | null;
 
-    @Column({
+  @Column({
     type: 'int',
     name: 'investment_level_id',
     nullable: true,
