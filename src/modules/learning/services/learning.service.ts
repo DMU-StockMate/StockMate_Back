@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, In, Repository } from 'typeorm';
+import { FindOptionsWhere, In, IsNull, Not, Repository } from 'typeorm';
 
 import { TradingService } from '../../trading/services/trading.service';
 import { User } from '../../users/entities/user.entity';
@@ -222,7 +222,7 @@ export class LearningService {
 
     const [attempts, bookmarks, questions] = await Promise.all([
       this.attemptRepository.find({
-        where: { user_id: userId },
+        where: { user_id: userId, selected_choice_id: Not(IsNull()) },
         relations: [
           'question',
           'question.topicName',
@@ -373,6 +373,7 @@ export class LearningService {
     questionId: number,
   ): Promise<QuestionResponseDto> {
     const question = await this.findQuestionEntityById(userId, questionId);
+    const attempt = await this.findAttempt(userId, questionId);
 
     return {
       questionId: question.question_id,
@@ -381,6 +382,11 @@ export class LearningService {
         id: choice.choice_id,
         text: choice.choice_text,
       })),
+      alreadySolved: attempt?.selected_choice_id != null,
+      lastCorrect: attempt?.is_correct ?? null,
+      selectedChoiceId: attempt?.selected_choice_id ?? null,
+      lastSolvedAt: attempt?.selected_choice_id ? attempt.solved_at : null,
+      rewardCashEarned: attempt?.reward_cash_earned ?? 0,
     };
   }
 
@@ -396,34 +402,30 @@ export class LearningService {
     }
 
     const isCorrect = selectedChoice.is_correct;
-    const reward =
-      isCorrect && this.isRewardableQuestion(question) ? question.reward_cash : 0;
+    const rewardCash =
+      isCorrect && this.isRewardableQuestion(question)
+        ? question.reward_cash
+        : 0;
 
-    const previousAttempt = await this.attemptRepository.findOne({
-      where: { user_id: userId, question_id: questionId },
-    });
-    const alreadyRewarded = previousAttempt?.is_correct === true;
+    const attempt =
+      (await this.findAttempt(userId, questionId)) ??
+      this.attemptRepository.create({
+        user_id: userId,
+        question_id: questionId,
+        reward_cash_earned: 0,
+      });
+    const alreadyRewarded = attempt.reward_cash_earned > 0;
+    const reward = alreadyRewarded ? 0 : rewardCash;
 
-    // 같은 사용자가 같은 문제를 이미 푼 경우 기존 기록 삭제
-    await this.attemptRepository.delete({
-      user_id: userId,
-      question_id: questionId,
-    });
-
-    const attempt = this.attemptRepository.create({
-      user_id: userId,
-      question_id: questionId,
-      selected_choice_id: dto.selectedChoiceId,
-      is_correct: isCorrect,
-      reward_cash_earned: reward,
-    });
-
+    attempt.selected_choice_id = dto.selectedChoiceId;
+    attempt.is_correct = isCorrect;
+    attempt.solved_at = new Date();
+    if (reward > 0) {
+      attempt.reward_cash_earned = reward;
+    }
     const savedAttempt = await this.attemptRepository.save(attempt);
 
-    // ponytail: 이미 보상받은 문제를 재제출해 다시 맞혀도 중복 지급하지 않음.
-    // 반대로 맞힌 문제를 재제출해 틀리게 바뀌는 경우 이미 지급된 금액을 회수하지는 않음
-    // (실제 화폐가 아닌 학습용 시뮬레이션 잔액이라 영향이 제한적) — 회수가 필요해지면 여기서 처리.
-    if (isCorrect && !alreadyRewarded && reward > 0) {
+    if (isCorrect && reward > 0) {
       await this.tradingService.creditReward(
         userId,
         reward,
@@ -437,6 +439,7 @@ export class LearningService {
       selectedChoiceId: dto.selectedChoiceId,
       correct: isCorrect,
       reward,
+      alreadyRewarded,
       explanation: question.explanation,
     };
   }
@@ -445,6 +448,7 @@ export class LearningService {
     return this.attemptRepository.find({
       where: {
         user_id: userId,
+        selected_choice_id: Not(IsNull()),
       },
       relations: ['question'],
       order: {
@@ -457,6 +461,7 @@ export class LearningService {
     const attempts = await this.attemptRepository.find({
       where: {
         user_id: userId,
+        selected_choice_id: Not(IsNull()),
       },
     });
 
@@ -523,6 +528,42 @@ export class LearningService {
     return {
       message: '오답 기록이 삭제되었습니다.',
       questionId,
+    };
+  }
+
+  async resetQuestionAttempt(userId: number, questionId: number) {
+    await this.findQuestionEntityById(userId, questionId);
+    const attempt = await this.findAttempt(userId, questionId);
+
+    if (!attempt) {
+      return {
+        message: '초기화할 풀이 기록이 없습니다.',
+        questionId,
+      };
+    }
+
+    attempt.selected_choice_id = null;
+    attempt.is_correct = null;
+    await this.attemptRepository.save(attempt);
+
+    return {
+      message: '문제 풀이 기록이 초기화되었습니다.',
+      questionId,
+    };
+  }
+
+  async resetAllAttempts(userId: number) {
+    const result = await this.attemptRepository.update(
+      { user_id: userId },
+      {
+        selected_choice_id: null,
+        is_correct: null,
+      },
+    );
+
+    return {
+      message: '전체 문제 풀이 기록이 초기화되었습니다.',
+      resetCount: result.affected ?? 0,
     };
   }
 
@@ -918,6 +959,13 @@ export class LearningService {
       question.status === 'ACTIVE' &&
       question.sourceType === QuizSourceType.DEFAULT
     );
+  }
+
+  private findAttempt(userId: number, questionId: number) {
+    return this.attemptRepository.findOne({
+      where: { user_id: userId, question_id: questionId },
+      order: { solved_at: 'DESC', attempt_id: 'DESC' },
+    });
   }
 
   private toStrategy(mode: RecommendationMode) {

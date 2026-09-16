@@ -20,11 +20,11 @@ export class QuizAttempt {
   @Column()
   question_id: number;
 
-  @Column({ nullable: true })
-  selected_choice_id: number;
+  @Column({ type: 'int', nullable: true })
+  selected_choice_id: number | null;
 
-  @Column({ nullable: true })
-  is_correct: boolean;
+  @Column({ type: 'boolean', nullable: true })
+  is_correct: boolean | null;
 
   @Column({ default: 0 })
   reward_cash_earned: number;

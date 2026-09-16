@@ -271,6 +271,43 @@ export class LearningController {
     );
   }
 
+  @Delete('questions/:questionId/attempt')
+  @ApiOperation({
+    summary: '문제 풀이 기록 초기화',
+    description: '특정 문제를 다시 풀 수 있도록 풀이 상태를 초기화합니다.',
+  })
+  @ApiParam({
+    name: 'questionId',
+    type: Number,
+    description: '초기화할 문제 ID',
+  })
+  @ApiResponse({
+    status: 200,
+    description: '문제 풀이 기록 초기화 성공',
+  })
+  resetQuestionAttempt(
+    @Req() req,
+    @Param('questionId', ParseIntPipe) questionId: number,
+  ) {
+    return this.learningService.resetQuestionAttempt(
+      req.user.userId,
+      questionId,
+    );
+  }
+
+  @Delete('attempts')
+  @ApiOperation({
+    summary: '전체 문제 풀이 기록 초기화',
+    description: '로그인한 사용자의 전체 문제 풀이 상태를 초기화합니다.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: '전체 문제 풀이 기록 초기화 성공',
+  })
+  resetAllAttempts(@Req() req) {
+    return this.learningService.resetAllAttempts(req.user.userId);
+  }
+
   @Get('histories')
   @ApiOperation({
     summary: '학습 기록 조회',
