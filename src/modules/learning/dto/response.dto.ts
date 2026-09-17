@@ -54,6 +54,12 @@ export class QuestionResponseDto {
   questionId: number;
 
   @ApiProperty({
+    example: 'MULTIPLE_CHOICE',
+    description: '문제 유형',
+  })
+  questionType: string;
+
+  @ApiProperty({
     example: 'PER이 낮을수록 일반적으로 어떤 의미로 해석될 가능성이 높은가?',
     description: '문제 내용',
   })
@@ -64,6 +70,26 @@ export class QuestionResponseDto {
     message: '문제 내용은 비어 있을 수 없습니다.',
   })
   questionText: string;
+
+  @ApiProperty({
+    example: 'PER은 주가를 주당순이익으로 나눈 값입니다.',
+    nullable: true,
+    description: '문제 해설',
+  })
+  explanation: string | null;
+
+  @ApiProperty({
+    example: 1000,
+    description: '정답 시 지급 가능한 보상',
+  })
+  rewardCash: number;
+
+  @ApiProperty({
+    example: { categoryId: 1, categoryName: '주식 기본 개념' },
+    nullable: true,
+    description: '문제 카테고리',
+  })
+  category: { categoryId: number; categoryName: string } | null;
 
   @ApiProperty({
     description: '문제 선택지 목록',
@@ -111,4 +137,29 @@ export class QuestionResponseDto {
     description: '이 문제로 이미 지급받은 보상',
   })
   rewardCashEarned: number;
+
+  @ApiProperty({
+    example: true,
+    description: '이 문제 보상이 이미 지급되었는지 여부',
+  })
+  isRewarded: boolean;
+
+  @ApiProperty({
+    example: 'CORRECT',
+    enum: ['UNANSWERED', 'INCORRECT', 'CORRECT'],
+    description: '사용자별 문제 풀이 상태',
+  })
+  attemptStatus: 'UNANSWERED' | 'INCORRECT' | 'CORRECT';
+
+  @ApiProperty({
+    example: false,
+    description: '현재 상태에서 제출 가능한지 여부',
+  })
+  canSubmit: boolean;
+
+  @ApiProperty({
+    example: false,
+    description: '다시 풀기 버튼으로 재풀이 가능한지 여부',
+  })
+  canRetry: boolean;
 }

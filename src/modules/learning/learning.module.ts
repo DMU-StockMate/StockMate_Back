@@ -19,6 +19,7 @@ import { InvestmentLevel } from './entities/investment-level.entity';
 import { LearningConcept } from './entities/learning-concept.entity';
 import { LearningConceptBlock } from './entities/learning-concept-block.entity';
 import { LearningConceptQuiz } from './entities/learning-concept-quiz.entity';
+import { UserTutorial } from './entities/user-tutorial.entity';
 import { TradingModule } from '../trading/trading.module';
 
 @Module({
@@ -37,6 +38,7 @@ import { TradingModule } from '../trading/trading.module';
       LearningConcept,
       LearningConceptBlock,
       LearningConceptQuiz,
+      UserTutorial,
     ]),
     TradingModule,
   ],

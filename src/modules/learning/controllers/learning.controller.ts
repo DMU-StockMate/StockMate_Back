@@ -41,6 +41,33 @@ import { LearningService } from '../services/learning.service';
 export class LearningController {
   constructor(private readonly learningService: LearningService) {}
 
+  @Get('tutorials')
+  @ApiOperation({
+    summary: '학습 튜토리얼 완료 상태 목록 조회',
+    description: '로그인 사용자의 튜토리얼 완료 여부를 조회합니다.',
+  })
+  getTutorials(@Req() req) {
+    return this.learningService.getTutorials(req.user.userId);
+  }
+
+  @Get('tutorials/:tutorialType')
+  @ApiOperation({
+    summary: '학습 튜토리얼 완료 상태 조회',
+    description: '특정 튜토리얼의 완료 여부를 조회합니다.',
+  })
+  getTutorial(@Req() req, @Param('tutorialType') tutorialType: string) {
+    return this.learningService.getTutorial(req.user.userId, tutorialType);
+  }
+
+  @Post('tutorials/:tutorialType/complete')
+  @ApiOperation({
+    summary: '학습 튜토리얼 완료 처리',
+    description: '완료 또는 건너뛰기한 튜토리얼을 다시 자동 표시하지 않도록 저장합니다.',
+  })
+  completeTutorial(@Req() req, @Param('tutorialType') tutorialType: string) {
+    return this.learningService.completeTutorial(req.user.userId, tutorialType);
+  }
+
   @Get('topics')
   @ApiOperation({
     summary: '학습 카테고리 목록 조회',

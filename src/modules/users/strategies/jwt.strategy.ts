@@ -26,6 +26,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: any) {
+    if (!Number.isInteger(payload?.sub)) {
+      throw new UnauthorizedException('잘못된 토큰입니다.');
+    }
+
     const user = await this.userRepository.findOne({ where: { user_id: payload.sub } });
 
     if (!user || user.status === UserStatus.DELETED) {

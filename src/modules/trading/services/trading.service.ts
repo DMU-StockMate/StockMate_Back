@@ -65,7 +65,11 @@ export class TradingService implements OnModuleInit {
 
   onModuleInit() {
     this.kiwoomWebSocketService.registerPriceListener((stockCode, price) => {
-      void this.processPrice(stockCode, price);
+      void this.processPrice(stockCode, price).catch((error: unknown) => {
+        this.logger.warn(
+          `실시간 주문 처리 실패: ${stockCode} ${String(error)}`,
+        );
+      });
     });
   }
 
@@ -301,10 +305,15 @@ export class TradingService implements OnModuleInit {
     }
   }
 
-  async creditReward(userId: number, amount: number, refId: number | string) {
+  async creditReward(
+    userId: number,
+    amount: number,
+    refId: number | string,
+    manager?: EntityManager,
+  ) {
     if (amount <= 0) return;
 
-    return this.accountRepository.manager.transaction(async (manager) => {
+    const credit = async (manager: EntityManager) => {
       const account = await this.ensureAccountForUpdate(manager, userId);
 
       account.cashBalance = this.toDecimal(Number(account.cashBalance) + amount);
@@ -327,7 +336,11 @@ export class TradingService implements OnModuleInit {
         cashBalance: account.cashBalance,
         totalAssetValue: account.totalAssetValue,
       };
-    });
+    };
+
+    return manager
+      ? credit(manager)
+      : this.accountRepository.manager.transaction(credit);
   }
 
   private async notifyIfFilled(

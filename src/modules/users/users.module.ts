@@ -7,6 +7,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { EmailVerificationModule } from '../email/email-verification.module';
 import { FileModule } from '../file/module/file.module';
 import { DEFAULT_JWT_SECRET } from './constants/jwt.constants';
+import { AuthController } from './controllers/auth.controller';
 import { UsersController } from './controllers/users.controller';
 import { User } from './entities/user.entity';
 import { UsersService } from './services/users.service';
@@ -32,7 +33,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     EmailVerificationModule,
     FileModule,
   ],
-  controllers: [UsersController],
+  controllers: [UsersController, AuthController],
   providers: [UsersService, JwtStrategy],
   exports: [UsersService],
 })

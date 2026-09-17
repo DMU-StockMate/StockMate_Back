@@ -6,7 +6,14 @@ import {
 } from '@nestjs/common';
 
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, In, IsNull, Not, Repository } from 'typeorm';
+import {
+  DataSource,
+  FindOptionsWhere,
+  In,
+  IsNull,
+  Not,
+  Repository,
+} from 'typeorm';
 
 import { TradingService } from '../../trading/services/trading.service';
 import { User } from '../../users/entities/user.entity';
@@ -21,6 +28,7 @@ import { LearningConcept } from '../entities/learning-concept.entity';
 import { QuizAttempt } from '../entities/quiz-attempt.entity';
 import { QuizBookmark } from '../entities/quiz-bookmark.entity';
 import { QuizCategory } from '../entities/quiz-category.entity';
+import { TutorialType, UserTutorial } from '../entities/user-tutorial.entity';
 import {
   QuizPoolType,
   QuizQuestion,
@@ -68,8 +76,58 @@ export class LearningService {
     @InjectRepository(LearningConceptQuiz)
     private readonly conceptQuizRepository: Repository<LearningConceptQuiz>,
 
+    @InjectRepository(UserTutorial)
+    private readonly tutorialRepository: Repository<UserTutorial>,
+
+    private readonly dataSource: DataSource,
+
     private readonly tradingService: TradingService,
   ) {}
+
+  async getTutorials(userId: number) {
+    const rows = await this.tutorialRepository.find({
+      where: { userId },
+      order: { tutorialType: 'ASC' },
+    });
+    return rows.map((row) => this.toTutorialResponse(row));
+  }
+
+  async getTutorial(userId: number, tutorialType: string) {
+    const type = this.parseTutorialType(tutorialType);
+    const row = await this.tutorialRepository.findOne({
+      where: { userId, tutorialType: type },
+    });
+    return row
+      ? this.toTutorialResponse(row)
+      : { tutorialType: type, completed: false, completedAt: null };
+  }
+
+  async completeTutorial(userId: number, tutorialType: string) {
+    const type = this.parseTutorialType(tutorialType);
+    const completedAt = new Date();
+    await this.tutorialRepository.upsert(
+      { userId, tutorialType: type, completed: true, completedAt },
+      ['userId', 'tutorialType'],
+    );
+    return { tutorialType: type, completed: true, completedAt };
+  }
+
+  private parseTutorialType(tutorialType: string) {
+    if (!Object.values(TutorialType).includes(tutorialType as TutorialType)) {
+      throw new BadRequestException('지원하지 않는 튜토리얼 유형입니다.');
+    }
+    return tutorialType as TutorialType;
+  }
+
+  private toTutorialResponse(row: UserTutorial) {
+    return {
+      id: Number(row.id),
+      userId: Number(row.userId),
+      tutorialType: row.tutorialType,
+      completed: row.completed,
+      completedAt: row.completedAt,
+    };
+  }
 
   async findAllTopics(): Promise<TopicResponseDto[]> {
     const categories = await this.categoryRepository.find({
@@ -377,16 +435,32 @@ export class LearningService {
 
     return {
       questionId: question.question_id,
+      questionType: question.question_type,
       questionText: question.question_text,
+      explanation: question.explanation,
+      rewardCash: question.reward_cash,
+      category: question.category
+        ? {
+            categoryId: question.category.categoryId,
+            categoryName: question.category.categoryName,
+          }
+        : null,
       choices: question.choices.map((choice) => ({
         id: choice.choice_id,
         text: choice.choice_text,
+        isCorrect: choice.is_correct,
       })),
       alreadySolved: attempt?.selected_choice_id != null,
       lastCorrect: attempt?.is_correct ?? null,
       selectedChoiceId: attempt?.selected_choice_id ?? null,
       lastSolvedAt: attempt?.selected_choice_id ? attempt.solved_at : null,
       rewardCashEarned: attempt?.reward_cash_earned ?? 0,
+      isRewarded: (attempt?.reward_cash_earned ?? 0) > 0,
+      attemptStatus: this.getAttemptStatus(attempt),
+      canSubmit:
+        !attempt ||
+        (attempt.is_correct !== true && attempt.reward_cash_earned <= 0),
+      canRetry: attempt?.is_correct === false && attempt.reward_cash_earned <= 0,
     };
   }
 
@@ -401,47 +475,86 @@ export class LearningService {
       throw new BadRequestException('해당 문제에 속하지 않는 선택지입니다.');
     }
 
-    const isCorrect = selectedChoice.is_correct;
-    const rewardCash =
-      isCorrect && this.isRewardableQuestion(question)
-        ? question.reward_cash
-        : 0;
+    const queryRunner = this.dataSource.createQueryRunner();
+    const lockKey = `quiz_attempt:${userId}:${questionId}`;
+    let locked = false;
 
-    const attempt =
-      (await this.findAttempt(userId, questionId)) ??
-      this.attemptRepository.create({
-        user_id: userId,
-        question_id: questionId,
-        reward_cash_earned: 0,
-      });
-    const alreadyRewarded = attempt.reward_cash_earned > 0;
-    const reward = alreadyRewarded ? 0 : rewardCash;
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    attempt.selected_choice_id = dto.selectedChoiceId;
-    attempt.is_correct = isCorrect;
-    attempt.solved_at = new Date();
-    if (reward > 0) {
-      attempt.reward_cash_earned = reward;
-    }
-    const savedAttempt = await this.attemptRepository.save(attempt);
+    try {
+      const lockRows = await queryRunner.query('SELECT GET_LOCK(?, 5) AS locked', [
+        lockKey,
+      ]);
+      locked = Number(lockRows?.[0]?.locked ?? 0) === 1;
 
-    if (isCorrect && reward > 0) {
-      await this.tradingService.creditReward(
-        userId,
+      if (!locked) {
+        throw new ConflictException('문제 풀이 처리 중입니다. 잠시 후 다시 시도해주세요.');
+      }
+
+      const attempt =
+        (await queryRunner.manager.findOne(QuizAttempt, {
+          where: { user_id: userId, question_id: questionId },
+          order: { solved_at: 'DESC', attempt_id: 'DESC' },
+        })) ??
+        queryRunner.manager.create(QuizAttempt, {
+          user_id: userId,
+          question_id: questionId,
+          reward_cash_earned: 0,
+        });
+
+      const alreadyRewarded = attempt.reward_cash_earned > 0;
+      if (attempt.is_correct === true || alreadyRewarded) {
+        throw new ConflictException('이미 맞힌 문제입니다.');
+      }
+
+      const isCorrect = selectedChoice.is_correct;
+      const reward =
+        isCorrect && this.isRewardableQuestion(question)
+          ? question.reward_cash
+          : 0;
+
+      attempt.selected_choice_id = dto.selectedChoiceId;
+      attempt.is_correct = isCorrect;
+      attempt.solved_at = new Date();
+      if (reward > 0) {
+        attempt.reward_cash_earned = reward;
+      }
+
+      const savedAttempt = await queryRunner.manager.save(QuizAttempt, attempt);
+
+      if (reward > 0) {
+        await this.tradingService.creditReward(
+          userId,
+          reward,
+          savedAttempt.attempt_id,
+          queryRunner.manager,
+        );
+      }
+
+      await queryRunner.commitTransaction();
+
+      return {
+        message: '정답 제출이 완료되었습니다.',
+        questionId,
+        selectedChoiceId: dto.selectedChoiceId,
+        correct: isCorrect,
         reward,
-        savedAttempt.attempt_id,
-      );
+        alreadyRewarded,
+        attemptStatus: this.getAttemptStatus(savedAttempt),
+        canSubmit: !isCorrect,
+        canRetry: !isCorrect,
+        explanation: question.explanation,
+      };
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      if (locked) {
+        await queryRunner.query('SELECT RELEASE_LOCK(?)', [lockKey]);
+      }
+      await queryRunner.release();
     }
-
-    return {
-      message: '정답 제출이 완료되었습니다.',
-      questionId,
-      selectedChoiceId: dto.selectedChoiceId,
-      correct: isCorrect,
-      reward,
-      alreadyRewarded,
-      explanation: question.explanation,
-    };
   }
 
   async getHistories(userId: number) {
@@ -542,6 +655,10 @@ export class LearningService {
       };
     }
 
+    if (attempt.is_correct === true || attempt.reward_cash_earned > 0) {
+      throw new ConflictException('이미 맞힌 문제는 초기화할 수 없습니다.');
+    }
+
     attempt.selected_choice_id = null;
     attempt.is_correct = null;
     await this.attemptRepository.save(attempt);
@@ -554,7 +671,7 @@ export class LearningService {
 
   async resetAllAttempts(userId: number) {
     const result = await this.attemptRepository.update(
-      { user_id: userId },
+      { user_id: userId, reward_cash_earned: 0 },
       {
         selected_choice_id: null,
         is_correct: null,
@@ -966,6 +1083,16 @@ export class LearningService {
       where: { user_id: userId, question_id: questionId },
       order: { solved_at: 'DESC', attempt_id: 'DESC' },
     });
+  }
+
+  private getAttemptStatus(
+    attempt?: QuizAttempt | null,
+  ): 'UNANSWERED' | 'INCORRECT' | 'CORRECT' {
+    if (attempt?.reward_cash_earned && attempt.reward_cash_earned > 0) {
+      return 'CORRECT';
+    }
+    if (!attempt?.selected_choice_id) return 'UNANSWERED';
+    return attempt.is_correct ? 'CORRECT' : 'INCORRECT';
   }
 
   private toStrategy(mode: RecommendationMode) {

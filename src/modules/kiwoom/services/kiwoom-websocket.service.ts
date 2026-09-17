@@ -90,6 +90,11 @@ export class KiwoomWebSocketService
       try {
         const message = JSON.parse(raw);
 
+        if (message.trnm === 'PING') {
+          this.ws?.send(raw);
+          return;
+        }
+
         if (message.trnm === 'LOGIN') {
           if (message.return_code === 0) {
             this.logger.log('키움 WebSocket 로그인 성공');
