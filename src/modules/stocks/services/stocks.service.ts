@@ -10,7 +10,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import axios from 'axios';
 import { concat, from, fromEvent, Observable, of } from 'rxjs';
-import { filter, map, mergeMap } from 'rxjs/operators';
+import { filter, map, mergeMap, scan } from 'rxjs/operators';
 import type { MessageEvent } from '@nestjs/common';
 import { StockPriceQueryDto } from '../dto/stock-price-query.dto';
 import { StockSearchQueryDto } from '../dto/stock-search-query.dto';
@@ -171,13 +171,17 @@ export class StocksService {
   async findDailyChart(ticker: string, query: StockPriceQueryDto) {
     const stock = await this.findByTicker(ticker);
     const prices = await this.findPricesByStock(stock.stockId, query, 'ASC');
+    const realtimePrices = await this.withRealtimeDailyCandle(
+      stock.ticker,
+      prices,
+    );
 
     return {
       stockId: stock.stockId,
       ticker: stock.ticker,
       companyName: stock.companyName,
       interval: 'daily',
-      prices,
+      prices: realtimePrices,
     };
   }
 
@@ -1024,8 +1028,52 @@ export class StocksService {
     );
   }
 
+  streamRealtimeChart(ticker: string): Observable<MessageEvent> {
+    return from(this.getRealtimeChartStreamContext(ticker)).pipe(
+      mergeMap(({ stock, previousClosePrice, initialCandle }) => {
+        const toEvent = (candle: RealtimeChartCandle): MessageEvent => {
+          const currentPrice = Number(candle.closePrice);
+          const change = this.stockPriceSnapshotService.calculatePriceChange(
+            currentPrice,
+            previousClosePrice,
+          );
+
+          return {
+            data: {
+              stockId: stock.stockId,
+              stockCode: stock.ticker,
+              ticker: stock.ticker,
+              companyName: stock.companyName,
+              interval: 'realtime',
+              currentPrice,
+              previousClosePrice,
+              changePrice: change.changePrice,
+              changeRate: change.changeRate,
+              candle,
+            },
+          };
+        };
+
+        const ticks$ = fromEvent<StockTick>(
+          this.kiwoomWebSocketService,
+          'tick',
+        ).pipe(
+          filter((tick) => tick.stockCode === ticker),
+          scan(
+            (candle, tick) => this.applyTickToCandle(candle, tick.price),
+            initialCandle,
+          ),
+          map((candle) => toEvent(candle)),
+        );
+
+        return concat(of(toEvent(initialCandle)), ticks$);
+      }),
+    );
+  }
+
   private async getStreamContext(ticker: string) {
     const stock = await this.findByTicker(ticker);
+    this.ensureRealtimeSubscribed(ticker);
     const [latestPrice] =
       await this.stockPriceSnapshotService.findTwoLatestPricesByStock(
         stock.stockId,
@@ -1033,9 +1081,195 @@ export class StocksService {
     const previousClosePrice = this.stockPriceSnapshotService.toNumberOrNull(
       latestPrice?.closePrice,
     );
-    const initialPrice =
-      await this.kiwoomWebSocketService.getCurrentPrice(ticker);
+    const initialPrice = await this.getCachedRealtimePrice(ticker);
 
     return { previousClosePrice, initialPrice };
   }
+
+  private async getRealtimeChartStreamContext(ticker: string) {
+    const stock = await this.findByTicker(ticker);
+    this.ensureRealtimeSubscribed(ticker);
+    const [latestPrice, previousPrice] =
+      await this.stockPriceSnapshotService.findTwoLatestPricesByStock(
+        stock.stockId,
+      );
+    const realtimePrice = await this.getCachedRealtimePrice(ticker);
+    const initialPrice =
+      realtimePrice ??
+      this.stockPriceSnapshotService.toNumberOrNull(latestPrice?.closePrice);
+
+    if (initialPrice === null) {
+      throw new NotFoundException('차트에 표시할 현재가 정보가 없습니다.');
+    }
+
+    return {
+      stock,
+      previousClosePrice:
+        realtimePrice !== null
+          ? this.stockPriceSnapshotService.toNumberOrNull(
+              latestPrice?.closePrice,
+            )
+          : this.stockPriceSnapshotService.toNumberOrNull(
+              previousPrice?.closePrice,
+            ),
+      initialCandle: this.buildRealtimeCandle(latestPrice, initialPrice),
+    };
+  }
+
+  private ensureRealtimeSubscribed(ticker: string) {
+    if (!this.kiwoomWebSocketService.isSubscribedStock(ticker)) {
+      this.kiwoomWebSocketService.subscribeStocks([ticker]);
+    }
+  }
+
+  private async getCachedRealtimePrice(ticker: string) {
+    if (typeof this.kiwoomWebSocketService.getCurrentPrice !== 'function') {
+      return null;
+    }
+
+    return this.kiwoomWebSocketService.getCurrentPrice(ticker);
+  }
+
+  private async withRealtimeDailyCandle(
+    ticker: string,
+    prices: StockPriceDaily[],
+  ) {
+    const realtimePrice = await this.getCachedRealtimePrice(ticker);
+
+    if (realtimePrice === null || prices.length === 0) {
+      return prices;
+    }
+
+    const today = this.getTodayDateString();
+    const copiedPrices = [...prices];
+    const lastPrice = copiedPrices[copiedPrices.length - 1];
+    const lastDate = lastPrice.tradeDate;
+
+    if (lastDate === today) {
+      copiedPrices[copiedPrices.length - 1] = this.applyRealtimeToDailyPrice(
+        lastPrice,
+        realtimePrice,
+      );
+      return copiedPrices;
+    }
+
+    copiedPrices.push(
+      this.stockPriceDailyRepository.create({
+        stockId: lastPrice.stockId,
+        tradeDate: today,
+        openPrice: this.toDecimalString(realtimePrice),
+        highPrice: this.toDecimalString(realtimePrice),
+        lowPrice: this.toDecimalString(realtimePrice),
+        closePrice: this.toDecimalString(realtimePrice),
+        volume: null,
+      }),
+    );
+
+    return copiedPrices;
+  }
+
+  private applyRealtimeToDailyPrice(
+    price: StockPriceDaily,
+    realtimePrice: number,
+  ) {
+    const highPrice = Math.max(
+      this.stockPriceSnapshotService.toNumberOrNull(price.highPrice) ??
+        realtimePrice,
+      realtimePrice,
+    );
+    const lowPrice = Math.min(
+      this.stockPriceSnapshotService.toNumberOrNull(price.lowPrice) ??
+        realtimePrice,
+      realtimePrice,
+    );
+
+    return this.stockPriceDailyRepository.create({
+      ...price,
+      highPrice: this.toDecimalString(highPrice),
+      lowPrice: this.toDecimalString(lowPrice),
+      closePrice: this.toDecimalString(realtimePrice),
+    });
+  }
+
+  private buildRealtimeCandle(
+    latestPrice: StockPriceDaily | undefined,
+    currentPrice: number,
+  ): RealtimeChartCandle {
+    const today = this.getTodayDateString();
+
+    if (latestPrice?.tradeDate === today) {
+      return {
+        tradeDate: today,
+        openPrice: this.toDecimalString(
+          this.stockPriceSnapshotService.toNumberOrNull(
+            latestPrice.openPrice,
+          ) ?? currentPrice,
+        ),
+        highPrice: this.toDecimalString(
+          Math.max(
+            this.stockPriceSnapshotService.toNumberOrNull(
+              latestPrice.highPrice,
+            ) ?? currentPrice,
+            currentPrice,
+          ),
+        ),
+        lowPrice: this.toDecimalString(
+          Math.min(
+            this.stockPriceSnapshotService.toNumberOrNull(
+              latestPrice.lowPrice,
+            ) ?? currentPrice,
+            currentPrice,
+          ),
+        ),
+        closePrice: this.toDecimalString(currentPrice),
+        volume: latestPrice.volume ?? null,
+      };
+    }
+
+    return {
+      tradeDate: today,
+      openPrice: this.toDecimalString(currentPrice),
+      highPrice: this.toDecimalString(currentPrice),
+      lowPrice: this.toDecimalString(currentPrice),
+      closePrice: this.toDecimalString(currentPrice),
+      volume: null,
+    };
+  }
+
+  private applyTickToCandle(
+    candle: RealtimeChartCandle,
+    currentPrice: number,
+  ): RealtimeChartCandle {
+    const highPrice = Math.max(Number(candle.highPrice), currentPrice);
+    const lowPrice = Math.min(Number(candle.lowPrice), currentPrice);
+
+    return {
+      ...candle,
+      highPrice: this.toDecimalString(highPrice),
+      lowPrice: this.toDecimalString(lowPrice),
+      closePrice: this.toDecimalString(currentPrice),
+    };
+  }
+
+  private getTodayDateString() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+
+    return `${year}-${month}-${day}`;
+  }
+
+  private toDecimalString(value: number) {
+    return value.toFixed(4);
+  }
 }
+
+type RealtimeChartCandle = {
+  tradeDate: string;
+  openPrice: string;
+  highPrice: string;
+  lowPrice: string;
+  closePrice: string;
+  volume: string | null;
+};
