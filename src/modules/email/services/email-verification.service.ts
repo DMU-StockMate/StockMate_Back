@@ -11,7 +11,7 @@ import { Redis } from 'ioredis';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
-import { User } from '../../users/entities/user.entity';
+import { User, UserAuthProvider } from '../../users/entities/user.entity';
 
 import { MailService } from './mail.service';
 
@@ -31,87 +31,69 @@ export class EmailVerificationService {
   ) {}
 
   private generateEmailCode(): string {
-    return Math.floor(
-      100000 + Math.random() * 900000,
-    ).toString();
+    return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
   private getEmailCodeKey(
     email: string,
     purpose: 'REGISTER' | 'RESET_PASSWORD',
   ): string {
-    return `email_verify:${purpose}:${email}`;
+    return `email_verify:${purpose}:${this.normalizeEmail(email)}`;
   }
 
   private getEmailVerifiedKey(
     email: string,
     purpose: 'REGISTER' | 'RESET_PASSWORD',
   ): string {
-    return `email_verified:${purpose}:${email}`;
+    return `email_verified:${purpose}:${this.normalizeEmail(email)}`;
   }
 
-  async sendEmailCode(
-    dto: SendEmailCodeDto,
-  ): Promise<{ message: string }> {
-    const { email, purpose } = dto;
+  private normalizeEmail(email: string): string {
+    return email.trim().toLowerCase();
+  }
+
+  async sendEmailCode(dto: SendEmailCodeDto): Promise<{ message: string }> {
+    const { purpose } = dto;
+    const email = this.normalizeEmail(dto.email);
 
     // 회원가입
     if (purpose === 'REGISTER') {
-      const exists = await this.userRepository.findOne({
-        where: { email },
-      });
+      const exists = await this.userRepository.findOne({ where: { email } });
 
-      if (exists) {
-        throw new BadRequestException(
-          '이미 사용 중인 이메일입니다.',
-        );
+      if (
+        exists &&
+        exists.status !== 'DELETED' &&
+        exists.auth_provider !== UserAuthProvider.GOOGLE
+      ) {
+        throw new BadRequestException('이미 사용 중인 이메일입니다.');
       }
-      
     }
 
     // 비밀번호 재설정
     if (purpose === 'RESET_PASSWORD') {
-      const exists = await this.userRepository.findOne({
-        where: { email },
-      });
+      const exists = await this.userRepository.findOne({ where: { email } });
 
       if (!exists) {
-        throw new NotFoundException(
-          '존재하지 않는 이메일입니다.',
-        );
+        throw new NotFoundException('존재하지 않는 이메일입니다.');
       }
     }
 
     const code = this.generateEmailCode();
     console.log(code);
 
-    const key = this.getEmailCodeKey(
-      email,
-      purpose,
-    );
+    const key = this.getEmailCodeKey(email, purpose);
 
     // 5분 저장
-    await this.redis.set(
-      key,
-      code,
-      'EX',
-      60 * 5,
-    );
+    await this.redis.set(key, code, 'EX', 60 * 5);
 
     try {
-      await this.mailService.sendVerificationCode(
-        email,
-        code,
-        purpose,
-      );
+      await this.mailService.sendVerificationCode(email, code, purpose);
     } catch (error) {
       console.error('이메일 발송 실패 원본 에러:', error);
 
       await this.redis.del(key);
 
-      throw new InternalServerErrorException(
-        '이메일 발송에 실패했습니다.',
-      );
+      throw new InternalServerErrorException('이메일 발송에 실패했습니다.');
     }
 
     return {
@@ -119,15 +101,11 @@ export class EmailVerificationService {
     };
   }
 
-  async verifyEmailCode(
-    dto: VerifyEmailCodeDto,
-  ): Promise<{ message: string }> {
-    const { email, code, purpose } = dto;
+  async verifyEmailCode(dto: VerifyEmailCodeDto): Promise<{ message: string }> {
+    const { code, purpose } = dto;
+    const email = this.normalizeEmail(dto.email);
 
-    const key = this.getEmailCodeKey(
-      email,
-      purpose,
-    );
+    const key = this.getEmailCodeKey(email, purpose);
 
     const savedCode = await this.redis.get(key);
 
@@ -138,9 +116,7 @@ export class EmailVerificationService {
     }
 
     if (savedCode !== code) {
-      throw new BadRequestException(
-        '인증코드가 일치하지 않습니다.',
-      );
+      throw new BadRequestException('인증코드가 일치하지 않습니다.');
     }
 
     // 기존 인증코드 삭제
@@ -148,10 +124,7 @@ export class EmailVerificationService {
 
     // 인증 완료 플래그 저장
     await this.redis.set(
-      this.getEmailVerifiedKey(
-        email,
-        purpose,
-      ),
+      this.getEmailVerifiedKey(email, purpose),
       'true',
       'EX',
       60 * 10,
@@ -167,16 +140,11 @@ export class EmailVerificationService {
     purpose: 'REGISTER' | 'RESET_PASSWORD',
   ): Promise<void> {
     const verified = await this.redis.get(
-      this.getEmailVerifiedKey(
-        email,
-        purpose,
-      ),
+      this.getEmailVerifiedKey(email, purpose),
     );
 
     if (verified !== 'true') {
-      throw new BadRequestException(
-        '이메일 인증이 필요합니다.',
-      );
+      throw new BadRequestException('이메일 인증이 필요합니다.');
     }
   }
 
@@ -184,11 +152,6 @@ export class EmailVerificationService {
     email: string,
     purpose: 'REGISTER' | 'RESET_PASSWORD',
   ): Promise<void> {
-    await this.redis.del(
-      this.getEmailVerifiedKey(
-        email,
-        purpose,
-      ),
-    );
+    await this.redis.del(this.getEmailVerifiedKey(email, purpose));
   }
 }

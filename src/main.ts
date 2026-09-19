@@ -16,8 +16,17 @@ async function bootstrap() {
       AppModule,
     );
 
+  const frontendOrigins = (process.env.FRONTEND_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
   app.enableCors({
-    origin: [/^http:\/\/localhost:\d+$/, /^http:\/\/127\.0\.0\.1:\d+$/],
+    origin: [
+      /^http:\/\/localhost:\d+$/,
+      /^http:\/\/127\.0\.0\.1:\d+$/,
+      ...frontendOrigins,
+    ],
     credentials: true,
   });
 
@@ -79,7 +88,7 @@ async function bootstrap() {
     next();
   });
 
-  await app.listen(3000);
+  await app.listen(process.env.PORT ? Number(process.env.PORT) : 3000);
 
   console.log('MAIL_HOST:', process.env.MAIL_HOST);
   console.log('MAIL_USER:', process.env.MAIL_USER);

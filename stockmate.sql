@@ -1165,6 +1165,7 @@ CREATE TABLE `users` (
   `name` varchar(50) NOT NULL,
   `nickname` varchar(50) DEFAULT NULL,
   `phone` varchar(50) DEFAULT NULL,
+  `auth_provider` enum('LOCAL','GOOGLE','BOTH') DEFAULT 'LOCAL',
   `role` enum('USER','ADMIN') DEFAULT 'USER',
   `status` enum('ACTIVE','INACTIVE','BANNED','DELETED') DEFAULT 'ACTIVE',
   `ban_until` datetime DEFAULT NULL,
@@ -1186,7 +1187,7 @@ CREATE TABLE `users` (
 
 LOCK TABLES `users` WRITE;
 /*!40000 ALTER TABLE `users` DISABLE KEYS */;
-INSERT INTO `users` VALUES (1,'sonjoo1@dongyang.ac.kr','$2b$10$NOBYfXZ88Vbl/7Ho78SMSuUTDKosFsNkZZN45y3qqDsAwe5u7.NJ6','홍길동','스톡메이트','010-1234-5678','USER','ACTIVE',NULL,1,NULL,'2026-08-24 08:46:23','2026-08-24 08:46:23');
+INSERT INTO `users` VALUES (1,'sonjoo1@dongyang.ac.kr','$2b$10$NOBYfXZ88Vbl/7Ho78SMSuUTDKosFsNkZZN45y3qqDsAwe5u7.NJ6','홍길동','스톡메이트','010-1234-5678','LOCAL','USER','ACTIVE',NULL,1,NULL,'2026-08-24 08:46:23','2026-08-24 08:46:23');
 /*!40000 ALTER TABLE `users` ENABLE KEYS */;
 UNLOCK TABLES;
 
