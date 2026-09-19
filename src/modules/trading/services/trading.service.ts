@@ -6,9 +6,12 @@ import {
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
+import axios from 'axios';
 import { EntityManager, In, Repository } from 'typeorm';
 import { KiwoomWebSocketService } from '../../kiwoom/services/kiwoom-websocket.service';
+import { KiwoomAuthService } from '../../kiwoom/services/kiwoom-auth.service';
 import { StockPriceDaily } from '../../stocks/entities/stock-price-daily.entity';
 import { Stock, StockStatus } from '../../stocks/entities/stock.entity';
 import { NotificationType } from '../../notification/entities/notification.entity';
@@ -73,6 +76,9 @@ export class TradingService implements OnModuleInit {
 
     @InjectRepository(StockTradingVenue)
     private readonly stockTradingVenueRepository: Repository<StockTradingVenue>,
+
+    private readonly configService: ConfigService,
+    private readonly kiwoomAuthService: KiwoomAuthService,
 
     private readonly notificationService: NotificationService,
   ) {}
@@ -615,6 +621,80 @@ export class TradingService implements OnModuleInit {
         totalAssetValue: account.totalAssetValue,
       };
     });
+  }
+
+  async syncNxtTradingVenues(options: {
+    limit?: number;
+    offset?: number;
+    delayMs?: number;
+  }) {
+    const requestedLimit = Number.isFinite(options.limit) ? options.limit : 300;
+    const requestedOffset = Number.isFinite(options.offset) ? options.offset : 0;
+    const requestedDelayMs = Number.isFinite(options.delayMs)
+      ? options.delayMs
+      : 250;
+    const limit = Math.min(Math.max(requestedLimit ?? 300, 1), 3000);
+    const offset = Math.max(requestedOffset ?? 0, 0);
+    const delayMs = Math.max(requestedDelayMs ?? 250, 0);
+
+    const stocks = await this.stockRepository.find({
+      where: {
+        status: StockStatus.ACTIVE,
+        isActive: true,
+        market: In(['KOSPI', 'KOSDAQ']),
+      },
+      order: { stockId: 'ASC' },
+      skip: offset,
+      take: limit,
+    });
+
+    let enabled = 0;
+    let disabled = 0;
+    let failed = 0;
+    const failures: Array<{ ticker: string; message: string }> = [];
+
+    for (const stock of stocks) {
+      try {
+        const isAvailable = await this.checkNxtAvailabilityByKiwoom(
+          stock.ticker,
+        );
+
+        await this.stockTradingVenueRepository.save(
+          this.stockTradingVenueRepository.create({
+            stockId: stock.stockId,
+            tradingVenue: TradingVenue.NXT,
+            isActive: isAvailable,
+          }),
+        );
+
+        if (isAvailable) {
+          enabled += 1;
+        } else {
+          disabled += 1;
+        }
+      } catch (error) {
+        failed += 1;
+        failures.push({
+          ticker: stock.ticker,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      if (delayMs > 0) {
+        await this.delay(delayMs);
+      }
+    }
+
+    return {
+      checked: stocks.length,
+      enabled,
+      disabled,
+      failed,
+      offset,
+      limit,
+      delayMs,
+      failures: failures.slice(0, 20),
+    };
   }
 
   private async notifyIfFilled(
@@ -1451,6 +1531,73 @@ export class TradingService implements OnModuleInit {
     }
 
     return closePrice;
+  }
+
+  private async checkNxtAvailabilityByKiwoom(ticker: string) {
+    const host =
+      this.configService.get<string>('KIWOOM_API_HOST') ??
+      'https://api.kiwoom.com';
+    const path =
+      this.configService.get<string>('KIWOOM_NXT_ELIGIBILITY_PATH') ??
+      '/api/dostk/stkinfo';
+    const apiId =
+      this.configService.get<string>('KIWOOM_NXT_ELIGIBILITY_API_ID') ??
+      'ka10001';
+    const suffix =
+      this.configService.get<string>('KIWOOM_NXT_ELIGIBILITY_CODE_SUFFIX') ??
+      '_NX';
+    const token = await this.kiwoomAuthService.getAccessToken();
+    const nxtCode = `${ticker}${suffix}`;
+
+    const response = await axios.post(
+      `${host}${path}`,
+      {
+        stk_cd: nxtCode,
+        stex_tp: '2',
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json;charset=UTF-8',
+          authorization: `Bearer ${token}`,
+          'api-id': apiId,
+          'cont-yn': 'N',
+          'next-key': '',
+        },
+        timeout: 10_000,
+      },
+    );
+
+    const data = response.data;
+    const returnCode = Number(data?.return_code ?? 0);
+    if (returnCode !== 0) {
+      return false;
+    }
+
+    const message = String(data?.return_msg ?? '');
+    if (/조회.*없|없습니다|불가|not\s*found|invalid/i.test(message)) {
+      return false;
+    }
+
+    return this.hasMeaningfulKiwoomNxtPayload(data, nxtCode);
+  }
+
+  private hasMeaningfulKiwoomNxtPayload(data: unknown, nxtCode: string) {
+    if (!data || typeof data !== 'object') return false;
+
+    const payload = data as Record<string, unknown>;
+    const stockCode = String(payload.stk_cd ?? '').trim();
+    const stockName = String(payload.stk_nm ?? '').trim();
+    const currentPrice = String(payload.cur_prc ?? '').trim();
+
+    if (stockCode !== nxtCode) return false;
+    if (!stockName) return false;
+    if (!currentPrice) return false;
+
+    return true;
+  }
+
+  private delay(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private async assertRegularMarketSession(
