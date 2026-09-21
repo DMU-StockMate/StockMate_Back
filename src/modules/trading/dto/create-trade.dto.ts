@@ -102,7 +102,7 @@ export class CreateTradeDto {
   @ApiPropertyOptional({
     example: '2026-09-17T09:00:00+09:00',
     description:
-      'Execution time for RESERVATION orders. Include a timezone offset, for example 2026-09-17T09:00:00+09:00.',
+      'Execution time for RESERVATION orders. Include a timezone offset, for example 2026-09-17T09:00:00+09:00. Reservation order entry is accepted only from 16:00 to 07:30 KST.',
   })
   @ValidateIf((dto: CreateTradeDto) => dto.orderType === OrderType.RESERVATION)
   @IsDateString({}, { message: 'scheduledAt must be an ISO date string.' })

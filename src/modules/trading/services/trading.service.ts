@@ -435,6 +435,7 @@ export class TradingService implements OnModuleInit {
     const executionOrderType = this.resolveReservationExecutionType(dto);
     const tradingVenue = this.resolveTradingVenue(dto.tradingVenue);
     await this.assertTradingVenueAvailable(stock, tradingVenue);
+    this.assertReservationOrderEntrySession();
     let reservationPrice = dto.price ?? 0;
 
     if (executionOrderType === OrderType.MARKET) {
@@ -770,7 +771,33 @@ export class TradingService implements OnModuleInit {
       });
     }
 
-    await this.assertRegularMarketSession(stock.market, tradingVenue);
+    const isRegularSession = await this.isRegularMarketOpen(
+      stock.market,
+      tradingVenue,
+    );
+    const isAcceptanceOnlySession =
+      await this.isNxtAfterMarketOrderAcceptanceOnly(
+        stock.market,
+        tradingVenue,
+      );
+
+    if (!isRegularSession) {
+      if (isAcceptanceOnlySession && orderType !== OrderType.MARKET) {
+        return this.createPendingLimitOrder(
+          userId,
+          stock,
+          side,
+          dto.quantity,
+          dto.price as number,
+          orderType,
+          orderType === OrderType.STOP_LIMIT ? (dto.stopPrice as number) : null,
+          { tradingVenue },
+        );
+      }
+
+      await this.assertRegularMarketSession(stock.market, tradingVenue);
+    }
+
     const currentPrice = await this.resolveServerCurrentPrice(stock.ticker);
 
     if (orderType === OrderType.MARKET) {
@@ -1713,6 +1740,24 @@ export class TradingService implements OnModuleInit {
     }
   }
 
+  private assertReservationOrderEntrySession() {
+    if (this.isReservationOrderEntrySession()) {
+      return;
+    }
+
+    throw new BadRequestException(
+      'RESERVATION orders can be placed only from 16:00 to 07:30 KST.',
+    );
+  }
+
+  private isReservationOrderEntrySession() {
+    const seconds = this.getKstSeconds();
+    return (
+      this.isBetweenSeconds(seconds, 16 * 3600, 24 * 3600) ||
+      this.isBetweenSeconds(seconds, 0, 7 * 3600 + 30 * 60)
+    );
+  }
+
   private async isRegularMarketOpen(
     market?: string | null,
     tradingVenue: TradingVenue = TradingVenue.KRX,
@@ -1733,6 +1778,17 @@ export class TradingService implements OnModuleInit {
     }
 
     return this.isBetweenSeconds(seconds, 9 * 3600, 15 * 3600 + 30 * 60);
+  }
+
+  private async isNxtAfterMarketOrderAcceptanceOnly(
+    market?: string | null,
+    tradingVenue: TradingVenue = TradingVenue.KRX,
+  ) {
+    if (tradingVenue !== TradingVenue.NXT) return false;
+    if (!(await this.isTradingBusinessDay(market))) return false;
+
+    const seconds = this.getKstSeconds();
+    return this.isBetweenSeconds(seconds, 15 * 3600 + 30 * 60, 15 * 3600 + 40 * 60);
   }
 
   private async isConditionalLimitCloseSession(market?: string | null) {
