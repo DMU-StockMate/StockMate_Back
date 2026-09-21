@@ -27,6 +27,9 @@ export class KiwoomWebSocketService
 
   private ws: WebSocket | null = null;
 
+  // Simulation policy: keep one unified current price per stock code.
+  // TradingVenue is handled by the trading module for session/eligibility checks,
+  // not by maintaining separate KRX/NXT execution prices.
   private readonly currentPrices = new Map<string, number>();
 
   private readonly subscribedStocks = new Set<string>();

@@ -298,6 +298,8 @@ export class TradingService implements OnModuleInit {
   async processPrice(stockCode: string, currentPrice: number) {
     if (!this.isValidPrice(currentPrice)) return;
 
+    // Uses the unified simulation price. Venue checks below decide whether each
+    // pending order can trade in its requested session.
     const stock = await this.stockRepository.findOne({
       where: {
         ticker: stockCode,
@@ -438,7 +440,7 @@ export class TradingService implements OnModuleInit {
     if (executionOrderType === OrderType.MARKET) {
       reservationPrice = await this.resolveServerCurrentPrice(stock.ticker);
     } else if (executionOrderType === OrderType.AFTER_HOURS_CLOSE) {
-      reservationPrice = await this.resolveLatestClosePrice(stock.stockId);
+      reservationPrice = await this.resolveTodayClosePrice(stock);
     }
 
     return this.createPendingLimitOrder(
@@ -550,7 +552,7 @@ export class TradingService implements OnModuleInit {
 
       const executionPrice =
         executionOrderType === OrderType.AFTER_HOURS_CLOSE
-          ? await this.resolveLatestClosePrice(stock.stockId)
+          ? await this.resolveTodayClosePrice(stock)
           : await this.resolveServerCurrentPrice(stock.ticker);
 
       order.executionOrderType = executionOrderType;
@@ -755,7 +757,7 @@ export class TradingService implements OnModuleInit {
 
     if (orderType === OrderType.AFTER_HOURS_CLOSE) {
       await this.assertAfterHoursCloseSession(stock.market, tradingVenue);
-      const executionPrice = await this.resolveLatestClosePrice(stock.stockId);
+      const executionPrice = await this.resolveTodayClosePrice(stock);
       return this.createAndFillOrder({
         userId,
         stock,
@@ -1470,6 +1472,8 @@ export class TradingService implements OnModuleInit {
   }
 
   private async resolveServerCurrentPrice(stockCode: string) {
+    // Unified simulation price: KRX/NXT are not priced separately in this app.
+    // tradingVenue affects availability and session rules only.
     const currentPrice = await this.kiwoomWebSocketService.getCurrentPrice(stockCode);
 
     if (!this.isValidPrice(currentPrice)) {
@@ -1517,18 +1521,105 @@ export class TradingService implements OnModuleInit {
     return typeof value === 'number' && Number.isFinite(value) && value > 0;
   }
 
-  private async resolveLatestClosePrice(stockId: number) {
-    const latestPrice = await this.stockPriceDailyRepository.findOne({
-      where: { stockId },
-      order: { tradeDate: 'DESC' },
+  private async resolveTodayClosePrice(stock: Stock) {
+    const today = this.formatDate(this.getKstNow());
+    const storedPrice = await this.stockPriceDailyRepository.findOne({
+      where: { stockId: stock.stockId, tradeDate: today },
     });
 
-    const closePrice = Number(latestPrice?.closePrice);
-    if (!this.isValidPrice(closePrice)) {
-      throw new NotFoundException(
-        'Latest close price is unavailable for this stock.',
-      );
+    const storedClosePrice = Number(storedPrice?.closePrice);
+    if (this.isValidPrice(storedClosePrice)) {
+      return storedClosePrice;
     }
+
+    const fetchedPrice = await this.fetchTodayClosePriceFromKiwoom(stock, today);
+    if (fetchedPrice) {
+      return fetchedPrice;
+    }
+
+    throw new NotFoundException(
+      'Today close price is unavailable, so AFTER_HOURS_CLOSE orders cannot be processed.',
+    );
+  }
+
+  private async fetchTodayClosePriceFromKiwoom(stock: Stock, tradeDate: string) {
+    const host =
+      this.configService.get<string>('KIWOOM_API_HOST') ??
+      'https://api.kiwoom.com';
+    const token = await this.kiwoomAuthService.getAccessToken();
+    const baseDt = tradeDate.replace(/-/g, '');
+
+    let data: Record<string, any>;
+    try {
+      const response = await axios.post(
+        `${host}/api/dostk/chart`,
+        {
+          stk_cd: stock.ticker,
+          base_dt: baseDt,
+          upd_stkpc_tp: '1',
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json;charset=UTF-8',
+            authorization: `Bearer ${token}`,
+            'api-id': 'ka10081',
+            'cont-yn': 'N',
+            'next-key': '',
+          },
+          timeout: 10_000,
+        },
+      );
+      data = response.data;
+    } catch (error) {
+      this.logger.warn(
+        `today close price lookup failed stockCode=${stock.ticker}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
+
+    if (Number(data?.return_code ?? 0) !== 0) {
+      return null;
+    }
+
+    const rows = Array.isArray(data?.stk_dt_pole_chart_qry)
+      ? data.stk_dt_pole_chart_qry
+      : [];
+    const todayRow = rows.find((row: Record<string, unknown>) => {
+      const rowDate = String(row?.dt ?? row?.date ?? '').replace(/-/g, '');
+      return rowDate === baseDt;
+    });
+
+    if (!todayRow) {
+      return null;
+    }
+
+    const closePrice = this.toPositiveNumber(
+      todayRow.cur_prc ?? todayRow.close_pric ?? todayRow.close,
+    );
+    if (!this.isValidPrice(closePrice)) {
+      return null;
+    }
+
+    await this.stockPriceDailyRepository.upsert(
+      this.stockPriceDailyRepository.create({
+        stockId: stock.stockId,
+        tradeDate,
+        openPrice: this.toDecimalOrNull(
+          todayRow.open_pric ?? todayRow.open,
+        ),
+        highPrice: this.toDecimalOrNull(
+          todayRow.high_pric ?? todayRow.high,
+        ),
+        lowPrice: this.toDecimalOrNull(todayRow.low_pric ?? todayRow.low),
+        closePrice: this.toDecimal(closePrice),
+        volume: this.toIntegerStringOrNull(
+          todayRow.trde_qty ?? todayRow.volume,
+        ),
+      }),
+      ['stockId', 'tradeDate'],
+    );
 
     return closePrice;
   }
@@ -1889,5 +1980,32 @@ export class TradingService implements OnModuleInit {
 
   private toDecimal(value: number) {
     return value.toFixed(2);
+  }
+
+  private toDecimalOrNull(value: unknown) {
+    const numberValue = this.toPositiveNumber(value);
+    return this.isValidPrice(numberValue) ? this.toDecimal(numberValue) : null;
+  }
+
+  private toIntegerStringOrNull(value: unknown) {
+    const numberValue = this.toPositiveNumber(value);
+    if (numberValue === null || !Number.isFinite(numberValue)) {
+      return null;
+    }
+
+    return Math.trunc(numberValue).toString();
+  }
+
+  private toPositiveNumber(value: unknown) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    const numberValue = Number(String(value).replace(/[^0-9.-]/g, ''));
+    if (!Number.isFinite(numberValue)) {
+      return null;
+    }
+
+    return Math.abs(numberValue);
   }
 }
