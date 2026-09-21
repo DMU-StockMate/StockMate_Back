@@ -95,6 +95,12 @@ export class TradingService implements OnModuleInit {
 
   async findAccount(userId: number) {
     const account = await this.ensureAccount(userId);
+    account.totalAssetValue = await this.calculateTotalAssetValue(
+      this.accountRepository.manager,
+      account.accountId,
+      account.cashBalance,
+    );
+    await this.accountRepository.save(account);
 
     return {
       accountId: account.accountId,
@@ -113,16 +119,35 @@ export class TradingService implements OnModuleInit {
       order: { updatedAt: 'DESC' },
     });
 
-    return holdings.map((holding) => ({
-      holdingId: holding.holdingId,
-      accountId: holding.accountId,
-      stockId: holding.stockId,
-      ticker: holding.stock.ticker,
-      companyName: holding.stock.companyName,
-      quantity: holding.quantity,
-      averagePrice: holding.avgBuyPrice,
-      updatedAt: holding.updatedAt,
-    }));
+    return Promise.all(
+      holdings.map(async (holding) => {
+        const averagePrice = Number(holding.avgBuyPrice);
+        const currentPrice = await this.resolveValuationPrice(
+          this.holdingRepository.manager,
+          holding,
+        );
+        const marketValue = currentPrice * holding.quantity;
+        const purchaseValue = averagePrice * holding.quantity;
+        const profitLoss = marketValue - purchaseValue;
+        const profitRate =
+          purchaseValue > 0 ? (profitLoss / purchaseValue) * 100 : 0;
+
+        return {
+          holdingId: holding.holdingId,
+          accountId: holding.accountId,
+          stockId: holding.stockId,
+          ticker: holding.stock.ticker,
+          companyName: holding.stock.companyName,
+          quantity: holding.quantity,
+          averagePrice: holding.avgBuyPrice,
+          currentPrice: this.toDecimal(currentPrice),
+          marketValue: this.toDecimal(marketValue),
+          profitLoss: this.toDecimal(profitLoss),
+          profitRate: profitRate.toFixed(2),
+          updatedAt: holding.updatedAt,
+        };
+      }),
+    );
   }
 
   async findAssetHistory(userId: number, days: number) {
@@ -1951,13 +1976,46 @@ export class TradingService implements OnModuleInit {
     accountId: number,
     cashBalance: string,
   ) {
-    const holdings = await manager.find(Holding, { where: { accountId } });
-    const stockValue = holdings.reduce(
-      (sum, holding) => sum + holding.quantity * Number(holding.avgBuyPrice),
-      0,
-    );
+    const holdings = await manager.find(Holding, {
+      where: { accountId },
+      relations: { stock: true },
+    });
+
+    let stockValue = 0;
+    for (const holding of holdings) {
+      const valuationPrice = await this.resolveValuationPrice(manager, holding);
+      stockValue += holding.quantity * valuationPrice;
+    }
 
     return this.toDecimal(Number(cashBalance) + stockValue);
+  }
+
+  private async resolveValuationPrice(
+    manager: EntityManager,
+    holding: Holding,
+  ) {
+    const fallbackPrice = Number(holding.avgBuyPrice);
+    const ticker = holding.stock?.ticker;
+
+    if (ticker) {
+      const currentPrice = await this.kiwoomWebSocketService.getCurrentPrice(
+        ticker,
+      );
+      if (this.isValidPrice(currentPrice)) {
+        return currentPrice;
+      }
+    }
+
+    const latestPrice = await manager.findOne(StockPriceDaily, {
+      where: { stockId: holding.stockId },
+      order: { tradeDate: 'DESC' },
+    });
+    const closePrice = Number(latestPrice?.closePrice);
+    if (this.isValidPrice(closePrice)) {
+      return closePrice;
+    }
+
+    return this.isValidPrice(fallbackPrice) ? fallbackPrice : 0;
   }
 
   private async saveCashHistory(
