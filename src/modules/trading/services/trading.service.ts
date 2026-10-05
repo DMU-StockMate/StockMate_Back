@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -40,7 +41,7 @@ import { TradingAccount } from '../entities/trading-account.entity';
 const INITIAL_CASH_BALANCE = 30000000;
 
 @Injectable()
-export class TradingService implements OnModuleInit {
+export class TradingService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TradingService.name);
   private scheduledOrderTimer: NodeJS.Timeout | null = null;
 
@@ -91,6 +92,13 @@ export class TradingService implements OnModuleInit {
       void this.processTimedOrders();
     }, 30_000);
     this.scheduledOrderTimer.unref?.();
+  }
+
+  onModuleDestroy() {
+    if (this.scheduledOrderTimer) {
+      clearInterval(this.scheduledOrderTimer);
+      this.scheduledOrderTimer = null;
+    }
   }
 
   async findAccount(userId: number) {
@@ -349,19 +357,66 @@ export class TradingService implements OnModuleInit {
     });
 
     for (const order of pendingOrders) {
-      if (!(await this.isTradingVenueAvailable(stock, order.tradingVenue))) {
+      await this.processPendingOrderWithPrice(order, stock, currentPrice);
+    }
+  }
+
+  async processTimedOrders() {
+    await this.processScheduledOrders();
+    await this.reconcilePendingOrders();
+
+    if (await this.isConditionalLimitCloseSession()) {
+      await this.processConditionalLimitCloseOrders();
+    }
+  }
+
+  private async reconcilePendingOrders() {
+    const orders = await this.orderRepository.find({
+      where: {
+        status: OrderStatus.PENDING,
+        orderType: In([
+          OrderType.LIMIT,
+          OrderType.STOP_LIMIT,
+          OrderType.CONDITIONAL_LIMIT,
+        ]),
+      },
+      relations: { stock: true },
+      order: { createdAt: 'ASC' },
+      take: 100,
+    });
+
+    for (const order of orders) {
+      const stock = order.stock;
+      if (!stock) continue;
+
+      const currentPrice = await this.kiwoomWebSocketService.getCurrentPrice(
+        stock.ticker,
+      );
+      if (!this.isValidPrice(currentPrice)) {
         continue;
       }
 
-      if (
-        !(await this.isRegularMarketOpen(stock.market, order.tradingVenue))
-      ) {
-        continue;
+      await this.processPendingOrderWithPrice(order, stock, currentPrice);
+    }
+  }
+
+  private async processPendingOrderWithPrice(
+    order: InvestmentOrder,
+    stock: Stock,
+    currentPrice: number,
+  ) {
+    try {
+      if (!(await this.isTradingVenueAvailable(stock, order.tradingVenue))) {
+        return;
+      }
+
+      if (!(await this.isRegularMarketOpen(stock.market, order.tradingVenue))) {
+        return;
       }
 
       if (order.orderType === OrderType.STOP_LIMIT) {
         if (!this.canTriggerStopOrder(order, currentPrice)) {
-          continue;
+          return;
         }
 
         const result = await this.triggerStopLimitOrder(
@@ -369,21 +424,21 @@ export class TradingService implements OnModuleInit {
           currentPrice,
         );
         await this.notifyIfFilled(order.userId, result);
-        continue;
+        return;
       }
 
-      if (this.canFillLimitOrder(order, currentPrice)) {
-        const result = await this.fillPendingOrder(order.orderId, currentPrice);
-        await this.notifyIfFilled(order.userId, result);
+      if (!this.canFillLimitOrder(order, currentPrice)) {
+        return;
       }
-    }
-  }
 
-  async processTimedOrders() {
-    await this.processScheduledOrders();
-
-    if (await this.isConditionalLimitCloseSession()) {
-      await this.processConditionalLimitCloseOrders();
+      const result = await this.fillPendingOrder(order.orderId, currentPrice);
+      await this.notifyIfFilled(order.userId, result);
+    } catch (error) {
+      this.logger.warn(
+        `pending order processing failed orderId=${order.orderId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
   }
 
@@ -1108,54 +1163,8 @@ export class TradingService implements OnModuleInit {
   }
 
   private async fillPendingOrder(orderId: string, executionPrice: number) {
-    return this.accountRepository.manager.transaction(async (manager) => {
-      const order = await manager.findOne(InvestmentOrder, {
-        where: { orderId, status: OrderStatus.PENDING },
-        lock: { mode: 'pessimistic_write' },
-      });
-
-      if (!order || !this.canFillLimitOrder(order, executionPrice)) {
-        return null;
-      }
-
-      const account = await this.ensureAccountForUpdate(manager, order.userId);
-      const stock = await manager.findOne(Stock, {
-        where: {
-          stockId: order.stockId,
-          status: StockStatus.ACTIVE,
-          isActive: true,
-        },
-      });
-
-      if (!stock) {
-        order.status = OrderStatus.REJECTED;
-        await manager.save(InvestmentOrder, order);
-        return null;
-      }
-
-      try {
-        return order.side === OrderSide.BUY
-          ? await this.fillBuyOrder(
-              manager,
-              account,
-              stock,
-              order,
-              executionPrice,
-            )
-          : await this.fillSellOrder(
-              manager,
-              account,
-              stock,
-              order,
-              executionPrice,
-            );
-      } catch (error) {
-        if (error instanceof BadRequestException) {
-          return null;
-        }
-
-        throw error;
-      }
+    return this.executePendingOrder(orderId, executionPrice, {
+      requireLimitCondition: true,
     });
   }
 
@@ -1163,53 +1172,72 @@ export class TradingService implements OnModuleInit {
     orderId: string,
     executionPrice: number,
   ) {
+    return this.executePendingOrder(orderId, executionPrice, {
+      requireLimitCondition: false,
+    });
+  }
+
+  private async executePendingOrder(
+    orderId: string,
+    executionPrice: number,
+    options: { requireLimitCondition: boolean },
+  ) {
     return this.accountRepository.manager.transaction(async (manager) => {
       const order = await manager.findOne(InvestmentOrder, {
         where: { orderId, status: OrderStatus.PENDING },
         lock: { mode: 'pessimistic_write' },
       });
 
-      if (!order) return null;
-
-      const account = await this.ensureAccountForUpdate(manager, order.userId);
-      const stock = await manager.findOne(Stock, {
-        where: {
-          stockId: order.stockId,
-          status: StockStatus.ACTIVE,
-          isActive: true,
-        },
-      });
-
-      if (!stock) {
-        order.status = OrderStatus.REJECTED;
-        await manager.save(InvestmentOrder, order);
+      if (!order) {
         return null;
       }
 
-      try {
-        return order.side === OrderSide.BUY
-          ? await this.fillBuyOrder(
-              manager,
-              account,
-              stock,
-              order,
-              executionPrice,
-            )
-          : await this.fillSellOrder(
-              manager,
-              account,
-              stock,
-              order,
-              executionPrice,
-            );
-      } catch (error) {
-        if (error instanceof BadRequestException) {
-          return null;
-        }
-
-        throw error;
+      if (
+        options.requireLimitCondition &&
+        !this.canFillLimitOrder(order, executionPrice)
+      ) {
+        return null;
       }
+
+      return this.executeLockedPendingOrder(manager, order, executionPrice);
     });
+  }
+
+  private async executeLockedPendingOrder(
+    manager: EntityManager,
+    order: InvestmentOrder,
+    executionPrice: number,
+  ) {
+    if (order.status !== OrderStatus.PENDING) {
+      return null;
+    }
+
+    const account = await this.ensureAccountForUpdate(manager, order.userId);
+    const stock = await manager.findOne(Stock, {
+      where: {
+        stockId: order.stockId,
+        status: StockStatus.ACTIVE,
+        isActive: true,
+      },
+    });
+
+    if (!stock) {
+      order.status = OrderStatus.REJECTED;
+      await manager.save(InvestmentOrder, order);
+      return null;
+    }
+
+    try {
+      return order.side === OrderSide.BUY
+        ? await this.fillBuyOrder(manager, account, stock, order, executionPrice)
+        : await this.fillSellOrder(manager, account, stock, order, executionPrice);
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        return null;
+      }
+
+      throw error;
+    }
   }
 
   private async triggerStopLimitOrder(orderId: string, currentPrice: number) {
@@ -1235,24 +1263,7 @@ export class TradingService implements OnModuleInit {
         return this.toOrderPlacementResponse(order, null, null, null);
       }
 
-      const account = await this.ensureAccountForUpdate(manager, order.userId);
-      const stock = await manager.findOne(Stock, {
-        where: {
-          stockId: order.stockId,
-          status: StockStatus.ACTIVE,
-          isActive: true,
-        },
-      });
-
-      if (!stock) {
-        order.status = OrderStatus.REJECTED;
-        await manager.save(InvestmentOrder, order);
-        return null;
-      }
-
-      return order.side === OrderSide.BUY
-        ? this.fillBuyOrder(manager, account, stock, order, currentPrice)
-        : this.fillSellOrder(manager, account, stock, order, currentPrice);
+      return this.executeLockedPendingOrder(manager, order, currentPrice);
     });
   }
 
@@ -1526,7 +1537,13 @@ export class TradingService implements OnModuleInit {
   private async resolveServerCurrentPrice(stockCode: string) {
     // Unified simulation price: KRX/NXT are not priced separately in this app.
     // tradingVenue affects availability and session rules only.
-    const currentPrice = await this.kiwoomWebSocketService.getCurrentPrice(stockCode);
+    const currentPrice =
+      typeof this.kiwoomWebSocketService.getCurrentPriceWithRestFallback ===
+      'function'
+        ? await this.kiwoomWebSocketService.getCurrentPriceWithRestFallback(
+            stockCode,
+          )
+        : await this.kiwoomWebSocketService.getCurrentPrice(stockCode);
 
     if (!this.isValidPrice(currentPrice)) {
       throw new NotFoundException(

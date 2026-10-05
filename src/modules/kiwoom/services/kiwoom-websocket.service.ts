@@ -7,10 +7,12 @@ import {
 } from '@nestjs/common';
 import { EventEmitter } from 'events';
 
+import axios from 'axios';
 import WebSocket from 'ws';
 
 import { KiwoomAuthService } from './kiwoom-auth.service';
 import { InjectRedis } from '@nestjs-modules/ioredis';
+import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
 export interface StockTick {
@@ -42,6 +44,7 @@ export class KiwoomWebSocketService
 
   constructor(
     private readonly kiwoomAuthService: KiwoomAuthService,
+    private readonly configService: ConfigService,
     @InjectRedis()
     private readonly redis: Redis,
   ) {
@@ -280,7 +283,7 @@ export class KiwoomWebSocketService
   async getCurrentPrice(stockCode: string): Promise<number | null> {
     const memoryPrice = this.currentPrices.get(stockCode);
 
-    if (memoryPrice) {
+    if (this.isValidPrice(memoryPrice)) {
       return memoryPrice;
     }
 
@@ -290,7 +293,25 @@ export class KiwoomWebSocketService
       return null;
     }
 
-    return Number(redisPrice);
+    const price = Number(redisPrice);
+    return this.isValidPrice(price) ? price : null;
+  }
+
+  async getCurrentPriceWithRestFallback(
+    stockCode: string,
+  ): Promise<number | null> {
+    const cachedPrice = await this.getCurrentPrice(stockCode);
+    if (this.isValidPrice(cachedPrice)) {
+      return cachedPrice;
+    }
+
+    const restPrice = await this.fetchCurrentPriceFromKiwoom(stockCode);
+    if (!this.isValidPrice(restPrice)) {
+      return null;
+    }
+
+    await this.cacheCurrentPrice(stockCode, restPrice);
+    return restPrice;
   }
 
   getAllCurrentPrices() {
@@ -300,5 +321,72 @@ export class KiwoomWebSocketService
         price,
       }),
     );
+  }
+
+  private async fetchCurrentPriceFromKiwoom(stockCode: string) {
+    const host =
+      this.configService.get<string>('KIWOOM_API_HOST') ??
+      'https://api.kiwoom.com';
+    const path =
+      this.configService.get<string>('KIWOOM_CURRENT_PRICE_PATH') ??
+      '/api/dostk/stkinfo';
+    const apiId =
+      this.configService.get<string>('KIWOOM_CURRENT_PRICE_API_ID') ??
+      'ka10001';
+    const token = await this.kiwoomAuthService.getAccessToken();
+
+    try {
+      const response = await axios.post(
+        `${host}${path}`,
+        {
+          stk_cd: stockCode,
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json;charset=UTF-8',
+            authorization: `Bearer ${token}`,
+            'api-id': apiId,
+            'cont-yn': 'N',
+            'next-key': '',
+          },
+          timeout: 10_000,
+        },
+      );
+
+      if (Number(response.data?.return_code ?? 0) !== 0) {
+        return null;
+      }
+
+      return this.toPositiveNumber(response.data?.cur_prc);
+    } catch (error) {
+      this.logger.warn(
+        `current price REST fallback failed stockCode=${stockCode}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
+  }
+
+  private async cacheCurrentPrice(stockCode: string, price: number) {
+    this.currentPrices.set(stockCode, price);
+    await this.redis.set(`stock:price:${stockCode}`, String(price), 'EX', 60);
+  }
+
+  private isValidPrice(value: unknown): value is number {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0;
+  }
+
+  private toPositiveNumber(value: unknown) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    const numberValue = Number(String(value).replace(/[^0-9.-]/g, ''));
+    if (!Number.isFinite(numberValue)) {
+      return null;
+    }
+
+    return Math.abs(numberValue);
   }
 }

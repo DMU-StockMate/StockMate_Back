@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS investment_orders (
   PRIMARY KEY (order_id),
   KEY idx_investment_orders_account_status (account_id, status),
   KEY idx_investment_orders_stock_status_type (stock_id, status, order_type),
+  KEY idx_investment_orders_status_type_stock (status, order_type, stock_id),
   CONSTRAINT fk_investment_orders_account
     FOREIGN KEY (account_id)
     REFERENCES simulation_accounts(account_id)

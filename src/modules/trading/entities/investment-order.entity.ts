@@ -44,6 +44,11 @@ export enum TradingVenue {
   'status',
   'orderType',
 ])
+@Index('idx_investment_orders_status_type_stock', [
+  'status',
+  'orderType',
+  'stockId',
+])
 export class InvestmentOrder {
   @PrimaryGeneratedColumn({ name: 'order_id', type: 'bigint' })
   orderId!: string;
