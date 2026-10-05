@@ -396,13 +396,14 @@ export class LearningService {
     }
 
     const isCorrect = selectedChoice.is_correct;
-    const reward =
+    const rewardCandidate =
       isCorrect && this.isRewardableQuestion(question) ? question.reward_cash : 0;
 
     const previousAttempt = await this.attemptRepository.findOne({
       where: { user_id: userId, question_id: questionId },
     });
     const alreadyRewarded = previousAttempt?.is_correct === true;
+    let reward = 0;
 
     // 같은 사용자가 같은 문제를 이미 푼 경우 기존 기록 삭제
     await this.attemptRepository.delete({
@@ -415,7 +416,7 @@ export class LearningService {
       question_id: questionId,
       selected_choice_id: dto.selectedChoiceId,
       is_correct: isCorrect,
-      reward_cash_earned: reward,
+      reward_cash_earned: 0,
     });
 
     const savedAttempt = await this.attemptRepository.save(attempt);
@@ -423,12 +424,20 @@ export class LearningService {
     // ponytail: 이미 보상받은 문제를 재제출해 다시 맞혀도 중복 지급하지 않음.
     // 반대로 맞힌 문제를 재제출해 틀리게 바뀌는 경우 이미 지급된 금액을 회수하지는 않음
     // (실제 화폐가 아닌 학습용 시뮬레이션 잔액이라 영향이 제한적) — 회수가 필요해지면 여기서 처리.
-    if (isCorrect && !alreadyRewarded && reward > 0) {
-      await this.tradingService.creditReward(
+    if (isCorrect && !alreadyRewarded && rewardCandidate > 0) {
+      const rewardResult = await this.tradingService.creditReward(
         userId,
-        reward,
-        savedAttempt.attempt_id,
+        rewardCandidate,
+        questionId,
+        'QUIZ_QUESTION',
       );
+
+      reward = rewardResult?.credited ? rewardCandidate : 0;
+
+      if (reward > 0) {
+        savedAttempt.reward_cash_earned = reward;
+        await this.attemptRepository.save(savedAttempt);
+      }
     }
 
     return {

@@ -36,6 +36,8 @@ export class KiwoomWebSocketService
 
   private readonly subscribedStocks = new Set<string>();
 
+  private readonly subscriptionConsumers = new Map<string, Set<string>>();
+
   private readonly priceListeners = new Set<
     (stockCode: string, price: number) => void | Promise<void>
   >();
@@ -101,7 +103,7 @@ export class KiwoomWebSocketService
             this.logger.log('키움 WebSocket 로그인 성공');
 
             if (this.subscribedStocks.size > 0) {
-              this.subscribeStocks([...this.subscribedStocks]);
+              this.sendStockRegistration([...this.subscribedStocks]);
             }
           } else {
             this.logger.error(
@@ -136,14 +138,53 @@ export class KiwoomWebSocketService
     });
   }
 
-  subscribeStocks(stockCodes: string[]) {
+  subscribeStocks(stockCodes: string[], consumerId = 'default') {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new BadRequestException('WebSocket이 아직 연결되지 않았습니다.');
     }
 
+    const newSubscriptions: string[] = [];
+
     stockCodes.forEach((stockCode) => {
+      const consumers =
+        this.subscriptionConsumers.get(stockCode) ?? new Set<string>();
+      const wasSubscribed = this.subscribedStocks.has(stockCode);
+
+      consumers.add(consumerId);
+      this.subscriptionConsumers.set(stockCode, consumers);
       this.subscribedStocks.add(stockCode);
+
+      if (!wasSubscribed) {
+        newSubscriptions.push(stockCode);
+      }
     });
+
+    if (newSubscriptions.length === 0) {
+      return;
+    }
+
+    const payload = {
+      trnm: 'REG',
+      grp_no: '1',
+      refresh: '1',
+      data: [
+        {
+          item: newSubscriptions,
+          type: ['0B'],
+        },
+      ],
+    };
+
+    this.logger.log(`실시간 종목 구독 요청: ${stockCodes.join(', ')}`);
+    this.logger.debug(JSON.stringify(payload));
+
+    this.ws.send(JSON.stringify(payload));
+  }
+
+  private sendStockRegistration(stockCodes: string[]) {
+    if (stockCodes.length === 0) {
+      return;
+    }
 
     const payload = {
       trnm: 'REG',
@@ -160,7 +201,7 @@ export class KiwoomWebSocketService
     this.logger.log(`실시간 종목 구독 요청: ${stockCodes.join(', ')}`);
     this.logger.debug(JSON.stringify(payload));
 
-    this.ws.send(JSON.stringify(payload));
+    this.ws?.send(JSON.stringify(payload));
   }
 
   isSubscribedStock(stockCode: string) {
@@ -195,11 +236,53 @@ export class KiwoomWebSocketService
     this.ws.send(JSON.stringify(payload));
   }
 
-  unsubscribeStocks(stockCodes: string[]) {
+  unsubscribeStocks(stockCodes: string[], consumerId = 'default') {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new BadRequestException('WebSocket이 아직 연결되지 않았습니다.');
     }
 
+    const removableSubscriptions: string[] = [];
+
+    stockCodes.forEach((stockCode) => {
+      const consumers = this.subscriptionConsumers.get(stockCode);
+      if (!consumers) {
+        return;
+      }
+
+      consumers.delete(consumerId);
+
+      if (consumers.size === 0) {
+        this.subscriptionConsumers.delete(stockCode);
+        this.subscribedStocks.delete(stockCode);
+        this.currentPrices.delete(stockCode);
+        removableSubscriptions.push(stockCode);
+      } else {
+        this.subscriptionConsumers.set(stockCode, consumers);
+      }
+    });
+
+    if (removableSubscriptions.length === 0) {
+      return;
+    }
+
+    const referenceCountedPayload = {
+      trnm: 'REMOVE',
+      grp_no: '1',
+      data: [
+        {
+          item: removableSubscriptions,
+          type: ['0B'],
+        },
+      ],
+    };
+
+    this.logger.log(
+      `realtime stock unsubscribe requested: ${removableSubscriptions.join(', ')}`,
+    );
+    this.ws.send(JSON.stringify(referenceCountedPayload));
+    return;
+
+    /*
     const notSubscribed = stockCodes.filter(
       (stockCode) => !this.subscribedStocks.has(stockCode),
     );
@@ -228,6 +311,9 @@ export class KiwoomWebSocketService
 
     this.logger.log(`실시간 종목 구독 해제: ${stockCodes.join(', ')}`);
     this.ws.send(JSON.stringify(payload));
+  }
+
+    */
   }
 
   private async handleMessage(message: any) {

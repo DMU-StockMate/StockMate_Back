@@ -677,11 +677,38 @@ export class TradingService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async creditReward(userId: number, amount: number, refId: number | string) {
-    if (amount <= 0) return;
+  async creditReward(
+    userId: number,
+    amount: number,
+    refId: number | string,
+    refType = 'QUIZ_ATTEMPT',
+  ) {
+    if (amount <= 0) {
+      return {
+        credited: false,
+        amount: 0,
+      };
+    }
 
     return this.accountRepository.manager.transaction(async (manager) => {
       const account = await this.ensureAccountForUpdate(manager, userId);
+      const existingReward = await manager.findOne(AccountCashHistory, {
+        where: {
+          accountId: account.accountId,
+          historyType: CashHistoryType.REWARD,
+          refType,
+          refId: String(refId),
+        },
+      });
+
+      if (existingReward) {
+        return {
+          credited: false,
+          amount: 0,
+          cashBalance: account.cashBalance,
+          totalAssetValue: account.totalAssetValue,
+        };
+      }
 
       account.cashBalance = this.toDecimal(Number(account.cashBalance) + amount);
       account.totalAssetValue = await this.calculateTotalAssetValue(
@@ -695,11 +722,13 @@ export class TradingService implements OnModuleInit, OnModuleDestroy {
         account,
         CashHistoryType.REWARD,
         amount,
-        'QUIZ_ATTEMPT',
+        refType,
         String(refId),
       );
 
       return {
+        credited: true,
+        amount,
         cashBalance: account.cashBalance,
         totalAssetValue: account.totalAssetValue,
       };

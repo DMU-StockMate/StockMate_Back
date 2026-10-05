@@ -1,4 +1,5 @@
 import axios from 'axios';
+import WebSocket from 'ws';
 import { KiwoomWebSocketService } from './kiwoom-websocket.service';
 
 jest.mock('axios');
@@ -72,5 +73,30 @@ describe('KiwoomWebSocketService current price fallback', () => {
     await expect(
       service.getCurrentPriceWithRestFallback('005930'),
     ).resolves.toBeNull();
+  });
+
+  it('keeps the real websocket subscription until every consumer unsubscribes', () => {
+    const { service } = makeService();
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: jest.fn(),
+    };
+    (service as any).ws = ws;
+
+    service.subscribeStocks(['005930'], 'watchlist:1:10');
+    service.subscribeStocks(['005930'], 'watchlist:2:20');
+
+    expect(ws.send).toHaveBeenCalledTimes(1);
+    expect(service.isSubscribedStock('005930')).toBe(true);
+
+    service.unsubscribeStocks(['005930'], 'watchlist:1:10');
+
+    expect(ws.send).toHaveBeenCalledTimes(1);
+    expect(service.isSubscribedStock('005930')).toBe(true);
+
+    service.unsubscribeStocks(['005930'], 'watchlist:2:20');
+
+    expect(ws.send).toHaveBeenCalledTimes(2);
+    expect(service.isSubscribedStock('005930')).toBe(false);
   });
 });
