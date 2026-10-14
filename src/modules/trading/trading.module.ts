@@ -8,6 +8,8 @@ import { AccountAssetSnapshot } from './entities/account-asset-snapshot.entity';
 import { AccountCashHistory } from './entities/account-cash-history.entity';
 import { Holding } from './entities/holding.entity';
 import { InvestmentOrder } from './entities/investment-order.entity';
+import { MarketHoliday } from './entities/market-holiday.entity';
+import { StockTradingVenue } from './entities/stock-trading-venue.entity';
 import { Trade } from './entities/trade.entity';
 import { TradingAccount } from './entities/trading-account.entity';
 import { TradingController } from './controllers/trading.controller';
@@ -24,6 +26,8 @@ import { TradingService } from './services/trading.service';
       Trade,
       AccountCashHistory,
       AccountAssetSnapshot,
+      MarketHoliday,
+      StockTradingVenue,
       Stock,
       StockPriceDaily,
     ]),

@@ -16,6 +16,9 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../users/guards/jwt-auth.guard';
+import { Roles } from '../../users/decorators/role-decorator';
+import { RolesGuard } from '../../users/guards/role-guard';
+import { UserRole } from '../../enums/role-enum';
 import { CreateTradeDto } from '../dto/create-trade.dto';
 import { RankingQueryDto } from '../dto/ranking-query.dto';
 import { TradeHistoryQueryDto } from '../dto/trade-history-query.dto';
@@ -108,5 +111,22 @@ export class TradingController {
   @ApiResponse({ status: 201, description: 'Pending order cancelled' })
   cancelOrder(@Request() req, @Param('orderId') orderId: string) {
     return this.tradingService.cancelOrder(req.user.userId, orderId);
+  }
+
+  @Post('admin/sync-nxt-venues')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Sync NXT tradable stocks from Kiwoom API' })
+  @ApiResponse({ status: 201, description: 'NXT venues synchronized' })
+  syncNxtTradingVenues(
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('delayMs') delayMs?: string,
+  ) {
+    return this.tradingService.syncNxtTradingVenues({
+      limit: limit === undefined ? undefined : Number(limit),
+      offset: offset === undefined ? undefined : Number(offset),
+      delayMs: delayMs === undefined ? undefined : Number(delayMs),
+    });
   }
 }

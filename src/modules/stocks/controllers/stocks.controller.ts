@@ -437,4 +437,17 @@ export class StocksController {
   ): Observable<MessageEvent> {
     return this.stocksService.streamCurrentPrice(ticker);
   }
+
+  @Sse(':ticker/chart/stream')
+  @ApiOperation({ summary: '종목 실시간 차트 캔들 스트림 (SSE)' })
+  @ApiParam({
+    name: 'ticker',
+    example: '005930',
+    description: '종목 코드',
+  })
+  streamRealtimeChart(
+    @Param('ticker') ticker: string,
+  ): Observable<MessageEvent> {
+    return this.stocksService.streamRealtimeChart(ticker);
+  }
 }

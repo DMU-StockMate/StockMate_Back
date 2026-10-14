@@ -19,6 +19,12 @@ export enum CashHistoryType {
 
 @Entity('account_cash_histories')
 @Index('idx_cash_history_type', ['historyType'])
+@Index('idx_cash_history_account_ref', [
+  'accountId',
+  'historyType',
+  'refType',
+  'refId',
+])
 export class AccountCashHistory {
   @PrimaryGeneratedColumn({ name: 'cash_history_id', type: 'bigint' })
   cashHistoryId!: string;

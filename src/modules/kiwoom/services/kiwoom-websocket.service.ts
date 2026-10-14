@@ -7,10 +7,12 @@ import {
 } from '@nestjs/common';
 import { EventEmitter } from 'events';
 
+import axios from 'axios';
 import WebSocket from 'ws';
 
 import { KiwoomAuthService } from './kiwoom-auth.service';
 import { InjectRedis } from '@nestjs-modules/ioredis';
+import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
 export interface StockTick {
@@ -27,9 +29,14 @@ export class KiwoomWebSocketService
 
   private ws: WebSocket | null = null;
 
+  // Simulation policy: keep one unified current price per stock code.
+  // TradingVenue is handled by the trading module for session/eligibility checks,
+  // not by maintaining separate KRX/NXT execution prices.
   private readonly currentPrices = new Map<string, number>();
 
   private readonly subscribedStocks = new Set<string>();
+
+  private readonly subscriptionConsumers = new Map<string, Set<string>>();
 
   private readonly priceListeners = new Set<
     (stockCode: string, price: number) => void | Promise<void>
@@ -39,6 +46,7 @@ export class KiwoomWebSocketService
 
   constructor(
     private readonly kiwoomAuthService: KiwoomAuthService,
+    private readonly configService: ConfigService,
     @InjectRedis()
     private readonly redis: Redis,
   ) {
@@ -100,7 +108,7 @@ export class KiwoomWebSocketService
             this.logger.log('키움 WebSocket 로그인 성공');
 
             if (this.subscribedStocks.size > 0) {
-              this.subscribeStocks([...this.subscribedStocks]);
+              this.sendStockRegistration([...this.subscribedStocks]);
             }
           } else {
             this.logger.error(
@@ -135,14 +143,53 @@ export class KiwoomWebSocketService
     });
   }
 
-  subscribeStocks(stockCodes: string[]) {
+  subscribeStocks(stockCodes: string[], consumerId = 'default') {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new BadRequestException('WebSocket이 아직 연결되지 않았습니다.');
     }
 
+    const newSubscriptions: string[] = [];
+
     stockCodes.forEach((stockCode) => {
+      const consumers =
+        this.subscriptionConsumers.get(stockCode) ?? new Set<string>();
+      const wasSubscribed = this.subscribedStocks.has(stockCode);
+
+      consumers.add(consumerId);
+      this.subscriptionConsumers.set(stockCode, consumers);
       this.subscribedStocks.add(stockCode);
+
+      if (!wasSubscribed) {
+        newSubscriptions.push(stockCode);
+      }
     });
+
+    if (newSubscriptions.length === 0) {
+      return;
+    }
+
+    const payload = {
+      trnm: 'REG',
+      grp_no: '1',
+      refresh: '1',
+      data: [
+        {
+          item: newSubscriptions,
+          type: ['0B'],
+        },
+      ],
+    };
+
+    this.logger.log(`실시간 종목 구독 요청: ${stockCodes.join(', ')}`);
+    this.logger.debug(JSON.stringify(payload));
+
+    this.ws.send(JSON.stringify(payload));
+  }
+
+  private sendStockRegistration(stockCodes: string[]) {
+    if (stockCodes.length === 0) {
+      return;
+    }
 
     const payload = {
       trnm: 'REG',
@@ -159,7 +206,7 @@ export class KiwoomWebSocketService
     this.logger.log(`실시간 종목 구독 요청: ${stockCodes.join(', ')}`);
     this.logger.debug(JSON.stringify(payload));
 
-    this.ws.send(JSON.stringify(payload));
+    this.ws?.send(JSON.stringify(payload));
   }
 
   isSubscribedStock(stockCode: string) {
@@ -194,11 +241,53 @@ export class KiwoomWebSocketService
     this.ws.send(JSON.stringify(payload));
   }
 
-  unsubscribeStocks(stockCodes: string[]) {
+  unsubscribeStocks(stockCodes: string[], consumerId = 'default') {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new BadRequestException('WebSocket이 아직 연결되지 않았습니다.');
     }
 
+    const removableSubscriptions: string[] = [];
+
+    stockCodes.forEach((stockCode) => {
+      const consumers = this.subscriptionConsumers.get(stockCode);
+      if (!consumers) {
+        return;
+      }
+
+      consumers.delete(consumerId);
+
+      if (consumers.size === 0) {
+        this.subscriptionConsumers.delete(stockCode);
+        this.subscribedStocks.delete(stockCode);
+        this.currentPrices.delete(stockCode);
+        removableSubscriptions.push(stockCode);
+      } else {
+        this.subscriptionConsumers.set(stockCode, consumers);
+      }
+    });
+
+    if (removableSubscriptions.length === 0) {
+      return;
+    }
+
+    const referenceCountedPayload = {
+      trnm: 'REMOVE',
+      grp_no: '1',
+      data: [
+        {
+          item: removableSubscriptions,
+          type: ['0B'],
+        },
+      ],
+    };
+
+    this.logger.log(
+      `realtime stock unsubscribe requested: ${removableSubscriptions.join(', ')}`,
+    );
+    this.ws.send(JSON.stringify(referenceCountedPayload));
+    return;
+
+    /*
     const notSubscribed = stockCodes.filter(
       (stockCode) => !this.subscribedStocks.has(stockCode),
     );
@@ -227,6 +316,9 @@ export class KiwoomWebSocketService
 
     this.logger.log(`실시간 종목 구독 해제: ${stockCodes.join(', ')}`);
     this.ws.send(JSON.stringify(payload));
+  }
+
+    */
   }
 
   private async handleMessage(message: any) {
@@ -282,7 +374,7 @@ export class KiwoomWebSocketService
   async getCurrentPrice(stockCode: string): Promise<number | null> {
     const memoryPrice = this.currentPrices.get(stockCode);
 
-    if (memoryPrice) {
+    if (this.isValidPrice(memoryPrice)) {
       return memoryPrice;
     }
 
@@ -292,7 +384,25 @@ export class KiwoomWebSocketService
       return null;
     }
 
-    return Number(redisPrice);
+    const price = Number(redisPrice);
+    return this.isValidPrice(price) ? price : null;
+  }
+
+  async getCurrentPriceWithRestFallback(
+    stockCode: string,
+  ): Promise<number | null> {
+    const cachedPrice = await this.getCurrentPrice(stockCode);
+    if (this.isValidPrice(cachedPrice)) {
+      return cachedPrice;
+    }
+
+    const restPrice = await this.fetchCurrentPriceFromKiwoom(stockCode);
+    if (!this.isValidPrice(restPrice)) {
+      return null;
+    }
+
+    await this.cacheCurrentPrice(stockCode, restPrice);
+    return restPrice;
   }
 
   getAllCurrentPrices() {
@@ -302,5 +412,72 @@ export class KiwoomWebSocketService
         price,
       }),
     );
+  }
+
+  private async fetchCurrentPriceFromKiwoom(stockCode: string) {
+    const host =
+      this.configService.get<string>('KIWOOM_API_HOST') ??
+      'https://api.kiwoom.com';
+    const path =
+      this.configService.get<string>('KIWOOM_CURRENT_PRICE_PATH') ??
+      '/api/dostk/stkinfo';
+    const apiId =
+      this.configService.get<string>('KIWOOM_CURRENT_PRICE_API_ID') ??
+      'ka10001';
+    const token = await this.kiwoomAuthService.getAccessToken();
+
+    try {
+      const response = await axios.post(
+        `${host}${path}`,
+        {
+          stk_cd: stockCode,
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json;charset=UTF-8',
+            authorization: `Bearer ${token}`,
+            'api-id': apiId,
+            'cont-yn': 'N',
+            'next-key': '',
+          },
+          timeout: 10_000,
+        },
+      );
+
+      if (Number(response.data?.return_code ?? 0) !== 0) {
+        return null;
+      }
+
+      return this.toPositiveNumber(response.data?.cur_prc);
+    } catch (error) {
+      this.logger.warn(
+        `current price REST fallback failed stockCode=${stockCode}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
+  }
+
+  private async cacheCurrentPrice(stockCode: string, price: number) {
+    this.currentPrices.set(stockCode, price);
+    await this.redis.set(`stock:price:${stockCode}`, String(price), 'EX', 60);
+  }
+
+  private isValidPrice(value: unknown): value is number {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0;
+  }
+
+  private toPositiveNumber(value: unknown) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    const numberValue = Number(String(value).replace(/[^0-9.-]/g, ''));
+    if (!Number.isFinite(numberValue)) {
+      return null;
+    }
+
+    return Math.abs(numberValue);
   }
 }

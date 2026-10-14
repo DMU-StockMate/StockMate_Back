@@ -3,10 +3,14 @@ import { WatchlistService } from './watchlist.service';
 const makeService = () => {
   const watchlistRepository = {
     findOne: jest.fn(),
+    remove: jest.fn(),
   };
   const stockRepository = {};
   const kiwoomWebSocketService = {
     getCurrentPrice: jest.fn(),
+    isSubscribedStock: jest.fn(),
+    subscribeStocks: jest.fn(),
+    unsubscribeStocks: jest.fn(),
   };
   const stockPriceSnapshotService = {
     findTwoLatestPricesByStock: jest.fn(),
@@ -58,5 +62,44 @@ describe('WatchlistService realtime price', () => {
       changeRate: null,
     });
     expect(stockPriceSnapshotService.calculatePriceChange).not.toHaveBeenCalled();
+  });
+
+  it('subscribes realtime prices with a watchlist-scoped consumer id', async () => {
+    const { service, watchlistRepository, kiwoomWebSocketService } =
+      makeService();
+
+    watchlistRepository.findOne.mockResolvedValue({
+      watchlistId: '10',
+      userId: 1,
+      stockId: 2,
+      stock: { ticker: '005930' },
+    });
+
+    await service.subscribeRealtime(1, '10');
+
+    expect(kiwoomWebSocketService.subscribeStocks).toHaveBeenCalledWith(
+      ['005930'],
+      'watchlist:1:10',
+    );
+  });
+
+  it('removes only the watchlist-scoped realtime consumer on delete', async () => {
+    const { service, watchlistRepository, kiwoomWebSocketService } =
+      makeService();
+    watchlistRepository.findOne.mockResolvedValue({
+      watchlistId: '10',
+      userId: 1,
+      stockId: 2,
+      stock: { ticker: '005930' },
+    });
+    watchlistRepository.remove.mockResolvedValue(undefined);
+    kiwoomWebSocketService.isSubscribedStock.mockReturnValue(true);
+
+    await service.remove(1, '10');
+
+    expect(kiwoomWebSocketService.unsubscribeStocks).toHaveBeenCalledWith(
+      ['005930'],
+      'watchlist:1:10',
+    );
   });
 });

@@ -76,7 +76,9 @@ export class WatchlistService {
     await this.watchlistRepository.remove(watchlist);
 
     if (this.kiwoomWebSocketService.isSubscribedStock(watchlist.stock.ticker)) {
-      this.kiwoomWebSocketService.unsubscribeStocks([watchlist.stock.ticker]);
+      this.kiwoomWebSocketService.unsubscribeStocks([
+        watchlist.stock.ticker,
+      ], this.toRealtimeConsumerId(userId, watchlistId));
     }
 
     return {
@@ -106,7 +108,10 @@ export class WatchlistService {
     const watchlist = await this.findOwnedWatchlist(userId, watchlistId);
     const stockCode = watchlist.stock.ticker;
 
-    this.kiwoomWebSocketService.subscribeStocks([stockCode]);
+    this.kiwoomWebSocketService.subscribeStocks(
+      [stockCode],
+      this.toRealtimeConsumerId(userId, watchlistId),
+    );
 
     return {
       message: '관심 종목 실시간 시세 구독 요청이 완료되었습니다.',
@@ -120,7 +125,10 @@ export class WatchlistService {
     const watchlist = await this.findOwnedWatchlist(userId, watchlistId);
     const stockCode = watchlist.stock.ticker;
 
-    this.kiwoomWebSocketService.unsubscribeStocks([stockCode]);
+    this.kiwoomWebSocketService.unsubscribeStocks(
+      [stockCode],
+      this.toRealtimeConsumerId(userId, watchlistId),
+    );
 
     return {
       message: '관심 종목 실시간 시세 구독 해제 요청이 완료되었습니다.',
@@ -203,6 +211,10 @@ export class WatchlistService {
     }
 
     return stock;
+  }
+
+  private toRealtimeConsumerId(userId: number, watchlistId: string) {
+    return `watchlist:${userId}:${watchlistId}`;
   }
 
   private async toResponse(watchlist: Watchlist) {

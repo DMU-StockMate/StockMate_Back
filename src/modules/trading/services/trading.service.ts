@@ -4,11 +4,16 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import axios from 'axios';
+import { EntityManager, In, Repository } from 'typeorm';
 import { KiwoomWebSocketService } from '../../kiwoom/services/kiwoom-websocket.service';
+import { KiwoomAuthService } from '../../kiwoom/services/kiwoom-auth.service';
+import { StockPriceDaily } from '../../stocks/entities/stock-price-daily.entity';
 import { Stock, StockStatus } from '../../stocks/entities/stock.entity';
 import { NotificationType } from '../../notification/entities/notification.entity';
 import { NotificationService } from '../../notification/services/notification.service';
@@ -26,15 +31,19 @@ import {
   OrderSide,
   OrderStatus,
   OrderType,
+  TradingVenue,
 } from '../entities/investment-order.entity';
+import { MarketHoliday } from '../entities/market-holiday.entity';
+import { StockTradingVenue } from '../entities/stock-trading-venue.entity';
 import { Trade, TradeType } from '../entities/trade.entity';
 import { TradingAccount } from '../entities/trading-account.entity';
 
 const INITIAL_CASH_BALANCE = 30000000;
 
 @Injectable()
-export class TradingService implements OnModuleInit {
+export class TradingService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TradingService.name);
+  private scheduledOrderTimer: NodeJS.Timeout | null = null;
 
   constructor(
     @InjectRepository(TradingAccount)
@@ -55,10 +64,22 @@ export class TradingService implements OnModuleInit {
     @InjectRepository(Stock)
     private readonly stockRepository: Repository<Stock>,
 
+    @InjectRepository(StockPriceDaily)
+    private readonly stockPriceDailyRepository: Repository<StockPriceDaily>,
+
     private readonly kiwoomWebSocketService: KiwoomWebSocketService,
 
     @InjectRepository(AccountAssetSnapshot)
     private readonly assetSnapshotRepository: Repository<AccountAssetSnapshot>,
+
+    @InjectRepository(MarketHoliday)
+    private readonly marketHolidayRepository: Repository<MarketHoliday>,
+
+    @InjectRepository(StockTradingVenue)
+    private readonly stockTradingVenueRepository: Repository<StockTradingVenue>,
+
+    private readonly configService: ConfigService,
+    private readonly kiwoomAuthService: KiwoomAuthService,
 
     private readonly notificationService: NotificationService,
   ) {}
@@ -71,10 +92,27 @@ export class TradingService implements OnModuleInit {
         );
       });
     });
+    this.scheduledOrderTimer = setInterval(() => {
+      void this.processTimedOrders();
+    }, 30_000);
+    this.scheduledOrderTimer.unref?.();
+  }
+
+  onModuleDestroy() {
+    if (this.scheduledOrderTimer) {
+      clearInterval(this.scheduledOrderTimer);
+      this.scheduledOrderTimer = null;
+    }
   }
 
   async findAccount(userId: number) {
     const account = await this.ensureAccount(userId);
+    account.totalAssetValue = await this.calculateTotalAssetValue(
+      this.accountRepository.manager,
+      account.accountId,
+      account.cashBalance,
+    );
+    await this.accountRepository.save(account);
 
     return {
       accountId: account.accountId,
@@ -93,16 +131,35 @@ export class TradingService implements OnModuleInit {
       order: { updatedAt: 'DESC' },
     });
 
-    return holdings.map((holding) => ({
-      holdingId: holding.holdingId,
-      accountId: holding.accountId,
-      stockId: holding.stockId,
-      ticker: holding.stock.ticker,
-      companyName: holding.stock.companyName,
-      quantity: holding.quantity,
-      averagePrice: holding.avgBuyPrice,
-      updatedAt: holding.updatedAt,
-    }));
+    return Promise.all(
+      holdings.map(async (holding) => {
+        const averagePrice = Number(holding.avgBuyPrice);
+        const currentPrice = await this.resolveValuationPrice(
+          this.holdingRepository.manager,
+          holding,
+        );
+        const marketValue = currentPrice * holding.quantity;
+        const purchaseValue = averagePrice * holding.quantity;
+        const profitLoss = marketValue - purchaseValue;
+        const profitRate =
+          purchaseValue > 0 ? (profitLoss / purchaseValue) * 100 : 0;
+
+        return {
+          holdingId: holding.holdingId,
+          accountId: holding.accountId,
+          stockId: holding.stockId,
+          ticker: holding.stock.ticker,
+          companyName: holding.stock.companyName,
+          quantity: holding.quantity,
+          averagePrice: holding.avgBuyPrice,
+          currentPrice: this.toDecimal(currentPrice),
+          marketValue: this.toDecimal(marketValue),
+          profitLoss: this.toDecimal(profitLoss),
+          profitRate: profitRate.toFixed(2),
+          updatedAt: holding.updatedAt,
+        };
+      }),
+    );
   }
 
   async findAssetHistory(userId: number, days: number) {
@@ -278,6 +335,8 @@ export class TradingService implements OnModuleInit {
   async processPrice(stockCode: string, currentPrice: number) {
     if (!this.isValidPrice(currentPrice)) return;
 
+    // Uses the unified simulation price. Venue checks below decide whether each
+    // pending order can trade in its requested session.
     const stock = await this.stockRepository.findOne({
       where: {
         ticker: stockCode,
@@ -291,30 +350,378 @@ export class TradingService implements OnModuleInit {
       where: {
         stockId: stock.stockId,
         status: OrderStatus.PENDING,
-        orderType: OrderType.LIMIT,
+        orderType: In([
+          OrderType.LIMIT,
+          OrderType.STOP_LIMIT,
+          OrderType.CONDITIONAL_LIMIT,
+        ]),
       },
       order: { createdAt: 'ASC' },
       take: 50,
     });
 
     for (const order of pendingOrders) {
-      if (this.canFillLimitOrder(order, currentPrice)) {
-        const result = await this.fillPendingOrder(order.orderId, currentPrice);
+      await this.processPendingOrderWithPrice(order, stock, currentPrice);
+    }
+  }
+
+  async processTimedOrders() {
+    await this.processScheduledOrders();
+    await this.reconcilePendingOrders();
+
+    if (await this.isConditionalLimitCloseSession()) {
+      await this.processConditionalLimitCloseOrders();
+    }
+  }
+
+  private async reconcilePendingOrders() {
+    const orders = await this.orderRepository.find({
+      where: {
+        status: OrderStatus.PENDING,
+        orderType: In([
+          OrderType.LIMIT,
+          OrderType.STOP_LIMIT,
+          OrderType.CONDITIONAL_LIMIT,
+        ]),
+      },
+      relations: { stock: true },
+      order: { createdAt: 'ASC' },
+      take: 100,
+    });
+
+    for (const order of orders) {
+      const stock = order.stock;
+      if (!stock) continue;
+
+      const currentPrice = await this.kiwoomWebSocketService.getCurrentPrice(
+        stock.ticker,
+      );
+      if (!this.isValidPrice(currentPrice)) {
+        continue;
+      }
+
+      await this.processPendingOrderWithPrice(order, stock, currentPrice);
+    }
+  }
+
+  private async processPendingOrderWithPrice(
+    order: InvestmentOrder,
+    stock: Stock,
+    currentPrice: number,
+  ) {
+    try {
+      if (!(await this.isTradingVenueAvailable(stock, order.tradingVenue))) {
+        return;
+      }
+
+      if (!(await this.isRegularMarketOpen(stock.market, order.tradingVenue))) {
+        return;
+      }
+
+      if (order.orderType === OrderType.STOP_LIMIT) {
+        if (!this.canTriggerStopOrder(order, currentPrice)) {
+          return;
+        }
+
+        const result = await this.triggerStopLimitOrder(
+          order.orderId,
+          currentPrice,
+        );
         await this.notifyIfFilled(order.userId, result);
+        return;
+      }
+
+      if (!this.canFillLimitOrder(order, currentPrice)) {
+        return;
+      }
+
+      const result = await this.fillPendingOrder(order.orderId, currentPrice);
+      await this.notifyIfFilled(order.userId, result);
+    } catch (error) {
+      this.logger.warn(
+        `pending order processing failed orderId=${order.orderId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  private validateAdvancedOrderRequest(
+    dto: CreateTradeDto,
+    orderType: OrderType,
+  ) {
+    if (
+      [OrderType.LIMIT, OrderType.STOP_LIMIT, OrderType.CONDITIONAL_LIMIT].includes(
+        orderType,
+      ) &&
+      !this.isValidPrice(dto.price)
+    ) {
+      throw new BadRequestException('A positive price is required.');
+    }
+
+    if (orderType === OrderType.STOP_LIMIT && !this.isValidPrice(dto.stopPrice)) {
+      throw new BadRequestException('A positive stopPrice is required.');
+    }
+
+    if (orderType !== OrderType.RESERVATION) {
+      return;
+    }
+
+    const executionOrderType = this.resolveReservationExecutionType(dto);
+    this.parseScheduledAt(dto.scheduledAt);
+
+    if (
+      executionOrderType === OrderType.LIMIT &&
+      !this.isValidPrice(dto.price)
+    ) {
+      throw new BadRequestException('LIMIT reservation requires price.');
+    }
+  }
+
+  private resolveReservationExecutionType(dto: CreateTradeDto) {
+    const executionOrderType = dto.executionOrderType;
+    if (
+      !executionOrderType ||
+      ![
+        OrderType.MARKET,
+        OrderType.LIMIT,
+        OrderType.AFTER_HOURS_CLOSE,
+      ].includes(executionOrderType)
+    ) {
+      throw new BadRequestException(
+        'RESERVATION supports MARKET, LIMIT, or AFTER_HOURS_CLOSE executionOrderType.',
+      );
+    }
+
+    return executionOrderType;
+  }
+
+  private parseScheduledAt(value: string | undefined) {
+    if (!value) {
+      throw new BadRequestException('RESERVATION requires scheduledAt.');
+    }
+
+    const scheduledAt = new Date(value);
+    if (Number.isNaN(scheduledAt.getTime())) {
+      throw new BadRequestException('scheduledAt must be a valid date.');
+    }
+
+    return scheduledAt;
+  }
+
+  private async createReservationOrder(
+    userId: number,
+    stock: Stock,
+    side: OrderSide,
+    dto: CreateTradeDto,
+  ) {
+    const scheduledAt = this.parseScheduledAt(dto.scheduledAt);
+    const executionOrderType = this.resolveReservationExecutionType(dto);
+    const tradingVenue = this.resolveTradingVenue(dto.tradingVenue);
+    await this.assertTradingVenueAvailable(stock, tradingVenue);
+    this.assertReservationOrderEntrySession();
+    let reservationPrice = dto.price ?? 0;
+
+    if (executionOrderType === OrderType.MARKET) {
+      reservationPrice = await this.resolveServerCurrentPrice(stock.ticker);
+    } else if (executionOrderType === OrderType.AFTER_HOURS_CLOSE) {
+      reservationPrice = await this.resolveTodayClosePrice(stock);
+    }
+
+    return this.createPendingLimitOrder(
+      userId,
+      stock,
+      side,
+      dto.quantity,
+      reservationPrice,
+      OrderType.RESERVATION,
+      null,
+      {
+        executionOrderType,
+        scheduledAt,
+        tradingVenue,
+        reservedAmount:
+          side === OrderSide.BUY ? reservationPrice * dto.quantity : 0,
+      },
+    );
+  }
+
+  private async processScheduledOrders() {
+    const orders = await this.orderRepository
+      .createQueryBuilder('order')
+      .where('order.status = :status', { status: OrderStatus.PENDING })
+      .andWhere('order.order_type = :orderType', {
+        orderType: OrderType.RESERVATION,
+      })
+      .andWhere('order.scheduled_at <= :now', { now: new Date() })
+      .orderBy('order.scheduled_at', 'ASC')
+      .take(50)
+      .getMany();
+
+    for (const order of orders) {
+      try {
+        const result = await this.executeReservationOrder(order.orderId);
+        await this.notifyIfFilled(order.userId, result);
+      } catch (error) {
+        this.logger.warn(
+          `reservation order processing failed orderId=${order.orderId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
       }
     }
   }
 
+<<<<<<< HEAD
+=======
+  private async executeReservationOrder(orderId: string) {
+    return this.accountRepository.manager.transaction(async (manager) => {
+      const order = await manager.findOne(InvestmentOrder, {
+        where: {
+          orderId,
+          status: OrderStatus.PENDING,
+          orderType: OrderType.RESERVATION,
+        },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!order) return null;
+
+      const stock = await manager.findOne(Stock, {
+        where: {
+          stockId: order.stockId,
+          status: StockStatus.ACTIVE,
+          isActive: true,
+        },
+      });
+      if (!stock) {
+        order.status = OrderStatus.REJECTED;
+        await manager.save(InvestmentOrder, order);
+        return null;
+      }
+
+      const account = await this.ensureAccountForUpdate(manager, order.userId);
+      const executionOrderType = order.executionOrderType ?? OrderType.MARKET;
+
+      if (executionOrderType === OrderType.LIMIT) {
+        if (
+          !(await this.isRegularMarketOpen(stock.market, order.tradingVenue))
+        ) {
+          return this.toOrderPlacementResponse(order, null, null, null);
+        }
+
+        const currentPrice = await this.resolveServerCurrentPrice(stock.ticker);
+        order.orderType = OrderType.LIMIT;
+        await manager.save(InvestmentOrder, order);
+
+        if (!this.canFillLimitOrder(order, currentPrice)) {
+          return this.toOrderPlacementResponse(order, null, null, null);
+        }
+
+        return order.side === OrderSide.BUY
+          ? this.fillBuyOrder(manager, account, stock, order, currentPrice)
+          : this.fillSellOrder(manager, account, stock, order, currentPrice);
+      }
+
+      if (
+        executionOrderType === OrderType.MARKET &&
+        !(await this.isRegularMarketOpen(stock.market, order.tradingVenue))
+      ) {
+        return this.toOrderPlacementResponse(order, null, null, null);
+      }
+
+      if (
+        executionOrderType === OrderType.AFTER_HOURS_CLOSE &&
+        !(await this.isAfterHoursCloseSession(stock.market, order.tradingVenue))
+      ) {
+        return this.toOrderPlacementResponse(order, null, null, null);
+      }
+
+      const executionPrice =
+        executionOrderType === OrderType.AFTER_HOURS_CLOSE
+          ? await this.resolveTodayClosePrice(stock)
+          : await this.resolveServerCurrentPrice(stock.ticker);
+
+      order.executionOrderType = executionOrderType;
+      return order.side === OrderSide.BUY
+        ? this.fillBuyOrder(manager, account, stock, order, executionPrice)
+        : this.fillSellOrder(manager, account, stock, order, executionPrice);
+    });
+  }
+
+  private async processConditionalLimitCloseOrders() {
+    const orders = await this.orderRepository.find({
+      where: {
+        status: OrderStatus.PENDING,
+        orderType: OrderType.CONDITIONAL_LIMIT,
+      },
+      order: { createdAt: 'ASC' },
+      take: 50,
+    });
+
+    for (const order of orders) {
+      if (order.tradingVenue !== TradingVenue.KRX) {
+        continue;
+      }
+
+      try {
+        const executionPrice = await this.resolveServerCurrentPrice(
+          order.stockCode,
+        );
+        const result = await this.fillPendingOrderAtMarket(
+          order.orderId,
+          executionPrice,
+        );
+        await this.notifyIfFilled(order.userId, result);
+      } catch (error) {
+        this.logger.warn(
+          `conditional limit close processing failed orderId=${order.orderId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+  }
+
+>>>>>>> main
   async creditReward(
     userId: number,
     amount: number,
     refId: number | string,
+<<<<<<< HEAD
     manager?: EntityManager,
   ) {
     if (amount <= 0) return;
+=======
+    refType = 'QUIZ_ATTEMPT',
+  ) {
+    if (amount <= 0) {
+      return {
+        credited: false,
+        amount: 0,
+      };
+    }
+>>>>>>> main
 
     const credit = async (manager: EntityManager) => {
       const account = await this.ensureAccountForUpdate(manager, userId);
+      const existingReward = await manager.findOne(AccountCashHistory, {
+        where: {
+          accountId: account.accountId,
+          historyType: CashHistoryType.REWARD,
+          refType,
+          refId: String(refId),
+        },
+      });
+
+      if (existingReward) {
+        return {
+          credited: false,
+          amount: 0,
+          cashBalance: account.cashBalance,
+          totalAssetValue: account.totalAssetValue,
+        };
+      }
 
       account.cashBalance = this.toDecimal(Number(account.cashBalance) + amount);
       account.totalAssetValue = await this.calculateTotalAssetValue(
@@ -328,11 +735,13 @@ export class TradingService implements OnModuleInit {
         account,
         CashHistoryType.REWARD,
         amount,
-        'QUIZ_ATTEMPT',
+        refType,
         String(refId),
       );
 
       return {
+        credited: true,
+        amount,
         cashBalance: account.cashBalance,
         totalAssetValue: account.totalAssetValue,
       };
@@ -341,6 +750,80 @@ export class TradingService implements OnModuleInit {
     return manager
       ? credit(manager)
       : this.accountRepository.manager.transaction(credit);
+  }
+
+  async syncNxtTradingVenues(options: {
+    limit?: number;
+    offset?: number;
+    delayMs?: number;
+  }) {
+    const requestedLimit = Number.isFinite(options.limit) ? options.limit : 300;
+    const requestedOffset = Number.isFinite(options.offset) ? options.offset : 0;
+    const requestedDelayMs = Number.isFinite(options.delayMs)
+      ? options.delayMs
+      : 250;
+    const limit = Math.min(Math.max(requestedLimit ?? 300, 1), 3000);
+    const offset = Math.max(requestedOffset ?? 0, 0);
+    const delayMs = Math.max(requestedDelayMs ?? 250, 0);
+
+    const stocks = await this.stockRepository.find({
+      where: {
+        status: StockStatus.ACTIVE,
+        isActive: true,
+        market: In(['KOSPI', 'KOSDAQ']),
+      },
+      order: { stockId: 'ASC' },
+      skip: offset,
+      take: limit,
+    });
+
+    let enabled = 0;
+    let disabled = 0;
+    let failed = 0;
+    const failures: Array<{ ticker: string; message: string }> = [];
+
+    for (const stock of stocks) {
+      try {
+        const isAvailable = await this.checkNxtAvailabilityByKiwoom(
+          stock.ticker,
+        );
+
+        await this.stockTradingVenueRepository.save(
+          this.stockTradingVenueRepository.create({
+            stockId: stock.stockId,
+            tradingVenue: TradingVenue.NXT,
+            isActive: isAvailable,
+          }),
+        );
+
+        if (isAvailable) {
+          enabled += 1;
+        } else {
+          disabled += 1;
+        }
+      } catch (error) {
+        failed += 1;
+        failures.push({
+          ticker: stock.ticker,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      if (delayMs > 0) {
+        await this.delay(delayMs);
+      }
+    }
+
+    return {
+      checked: stocks.length,
+      enabled,
+      disabled,
+      failed,
+      offset,
+      limit,
+      delayMs,
+      failures: failures.slice(0, 20),
+    };
   }
 
   private async notifyIfFilled(
@@ -378,6 +861,136 @@ export class TradingService implements OnModuleInit {
   }
 
   private async placeOrder(
+    userId: number,
+    dto: CreateTradeDto,
+    side: OrderSide,
+  ) {
+    const stockCode = this.resolveStockCode(dto);
+    const orderType = dto.orderType ?? OrderType.MARKET;
+    const tradingVenue = this.resolveTradingVenue(dto.tradingVenue);
+
+    if (dto.side && dto.side !== side) {
+      throw new BadRequestException('Request side does not match route side.');
+    }
+
+    this.validateAdvancedOrderRequest(dto, orderType);
+
+    const stock = await this.findActiveStock(stockCode);
+    await this.assertTradingVenueAvailable(stock, tradingVenue);
+
+    if (orderType === OrderType.RESERVATION) {
+      return this.createReservationOrder(userId, stock, side, dto);
+    }
+
+    if (orderType === OrderType.AFTER_HOURS_CLOSE) {
+      await this.assertAfterHoursCloseSession(stock.market, tradingVenue);
+      const executionPrice = await this.resolveTodayClosePrice(stock);
+      return this.createAndFillOrder({
+        userId,
+        stock,
+        side,
+        orderType,
+        quantity: dto.quantity,
+        limitPrice: null,
+        executionPrice,
+        tradingVenue,
+      });
+    }
+
+    const isRegularSession = await this.isRegularMarketOpen(
+      stock.market,
+      tradingVenue,
+    );
+    const isAcceptanceOnlySession =
+      await this.isNxtAfterMarketOrderAcceptanceOnly(
+        stock.market,
+        tradingVenue,
+      );
+
+    if (!isRegularSession) {
+      if (isAcceptanceOnlySession && orderType !== OrderType.MARKET) {
+        return this.createPendingLimitOrder(
+          userId,
+          stock,
+          side,
+          dto.quantity,
+          dto.price as number,
+          orderType,
+          orderType === OrderType.STOP_LIMIT ? (dto.stopPrice as number) : null,
+          { tradingVenue },
+        );
+      }
+
+      await this.assertRegularMarketSession(stock.market, tradingVenue);
+    }
+
+    const currentPrice = await this.resolveServerCurrentPrice(stock.ticker);
+
+    if (orderType === OrderType.MARKET) {
+      return this.createAndFillOrder({
+        userId,
+        stock,
+        side,
+        orderType,
+        quantity: dto.quantity,
+        limitPrice: null,
+        executionPrice: currentPrice,
+        tradingVenue,
+      });
+    }
+
+    const limitPrice = dto.price as number;
+
+    if (orderType === OrderType.STOP_LIMIT) {
+      const pending = await this.createPendingLimitOrder(
+        userId,
+        stock,
+        side,
+        dto.quantity,
+        limitPrice,
+        OrderType.STOP_LIMIT,
+        dto.stopPrice as number,
+        { tradingVenue },
+      );
+
+      if (this.canTriggerStopValues(side, currentPrice, dto.stopPrice as number)) {
+        return (
+          (await this.triggerStopLimitOrder(
+            pending.order.orderId,
+            currentPrice,
+          )) ?? pending
+        );
+      }
+
+      return pending;
+    }
+
+    if (this.canFillLimitValues(side, currentPrice, limitPrice)) {
+      return this.createAndFillOrder({
+        userId,
+        stock,
+        side,
+        orderType,
+        quantity: dto.quantity,
+        limitPrice,
+        executionPrice: currentPrice,
+        tradingVenue,
+      });
+    }
+
+    return this.createPendingLimitOrder(
+      userId,
+      stock,
+      side,
+      dto.quantity,
+      limitPrice,
+      orderType,
+      null,
+      { tradingVenue },
+    );
+  }
+
+  private async legacyPlaceOrder(
     userId: number,
     dto: CreateTradeDto,
     side: OrderSide,
@@ -431,6 +1044,71 @@ export class TradingService implements OnModuleInit {
   }
 
   private async createPendingLimitOrder(
+    userId: number,
+    stock: Stock,
+    side: OrderSide,
+    quantity: number,
+    limitPrice: number,
+    orderType: OrderType = OrderType.LIMIT,
+    stopPrice: number | null = null,
+    options: {
+      executionOrderType?: OrderType | null;
+      scheduledAt?: Date | null;
+      reservedAmount?: number | null;
+      tradingVenue?: TradingVenue;
+    } = {},
+  ) {
+    return this.accountRepository.manager.transaction(async (manager) => {
+      const account = await this.ensureAccountForUpdate(manager, userId);
+      const reservedAmount =
+        options.reservedAmount ??
+        (side === OrderSide.BUY ? limitPrice * quantity : 0);
+
+      if (side === OrderSide.BUY) {
+        const availableCash = await this.getAvailableCash(manager, account);
+        if (availableCash < reservedAmount) {
+          throw new BadRequestException('Available cash is not enough.');
+        }
+      } else {
+        const sellableQuantity = await this.getSellableQuantity(
+          manager,
+          account.accountId,
+          stock.stockId,
+        );
+        if (sellableQuantity < quantity) {
+          throw new BadRequestException('Sellable quantity is not enough.');
+        }
+      }
+
+      const order = await manager.save(
+        InvestmentOrder,
+        manager.create(InvestmentOrder, {
+          accountId: account.accountId,
+          userId,
+          stockId: stock.stockId,
+          stockCode: stock.ticker,
+          tradingVenue: options.tradingVenue ?? TradingVenue.KRX,
+          side,
+          orderType,
+          status: OrderStatus.PENDING,
+          quantity,
+          limitPrice: this.toDecimal(limitPrice),
+          stopPrice: stopPrice === null ? null : this.toDecimal(stopPrice),
+          executionOrderType: options.executionOrderType ?? null,
+          scheduledAt: options.scheduledAt ?? null,
+          reservedAmount: this.toDecimal(reservedAmount),
+        }),
+      );
+
+      this.logger.log(
+        `order pending userId=${userId} stockCode=${stock.ticker} venue=${options.tradingVenue ?? TradingVenue.KRX} side=${side} orderType=${orderType} quantity=${quantity} limitPrice=${limitPrice} stopPrice=${stopPrice ?? 'none'} scheduledAt=${options.scheduledAt?.toISOString() ?? 'none'}`,
+      );
+
+      return this.toOrderPlacementResponse(order, null, null, null);
+    });
+  }
+
+  private async legacyCreatePendingLimitOrder(
     userId: number,
     stock: Stock,
     side: OrderSide,
@@ -492,6 +1170,7 @@ export class TradingService implements OnModuleInit {
     quantity: number;
     limitPrice: number | null;
     executionPrice: number;
+    tradingVenue?: TradingVenue;
   }) {
     return this.accountRepository.manager.transaction(async (manager) => {
       const account = await this.ensureAccountForUpdate(manager, params.userId);
@@ -502,6 +1181,7 @@ export class TradingService implements OnModuleInit {
           userId: params.userId,
           stockId: params.stock.stockId,
           stockCode: params.stock.ticker,
+          tradingVenue: params.tradingVenue ?? TradingVenue.KRX,
           side: params.side,
           orderType: params.orderType,
           status: OrderStatus.PENDING,
@@ -529,54 +1209,107 @@ export class TradingService implements OnModuleInit {
   }
 
   private async fillPendingOrder(orderId: string, executionPrice: number) {
+    return this.executePendingOrder(orderId, executionPrice, {
+      requireLimitCondition: true,
+    });
+  }
+
+  private async fillPendingOrderAtMarket(
+    orderId: string,
+    executionPrice: number,
+  ) {
+    return this.executePendingOrder(orderId, executionPrice, {
+      requireLimitCondition: false,
+    });
+  }
+
+  private async executePendingOrder(
+    orderId: string,
+    executionPrice: number,
+    options: { requireLimitCondition: boolean },
+  ) {
     return this.accountRepository.manager.transaction(async (manager) => {
       const order = await manager.findOne(InvestmentOrder, {
         where: { orderId, status: OrderStatus.PENDING },
         lock: { mode: 'pessimistic_write' },
       });
 
-      if (!order || !this.canFillLimitOrder(order, executionPrice)) {
+      if (!order) {
         return null;
       }
 
-      const account = await this.ensureAccountForUpdate(manager, order.userId);
-      const stock = await manager.findOne(Stock, {
+      if (
+        options.requireLimitCondition &&
+        !this.canFillLimitOrder(order, executionPrice)
+      ) {
+        return null;
+      }
+
+      return this.executeLockedPendingOrder(manager, order, executionPrice);
+    });
+  }
+
+  private async executeLockedPendingOrder(
+    manager: EntityManager,
+    order: InvestmentOrder,
+    executionPrice: number,
+  ) {
+    if (order.status !== OrderStatus.PENDING) {
+      return null;
+    }
+
+    const account = await this.ensureAccountForUpdate(manager, order.userId);
+    const stock = await manager.findOne(Stock, {
+      where: {
+        stockId: order.stockId,
+        status: StockStatus.ACTIVE,
+        isActive: true,
+      },
+    });
+
+    if (!stock) {
+      order.status = OrderStatus.REJECTED;
+      await manager.save(InvestmentOrder, order);
+      return null;
+    }
+
+    try {
+      return order.side === OrderSide.BUY
+        ? await this.fillBuyOrder(manager, account, stock, order, executionPrice)
+        : await this.fillSellOrder(manager, account, stock, order, executionPrice);
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        return null;
+      }
+
+      throw error;
+    }
+  }
+
+  private async triggerStopLimitOrder(orderId: string, currentPrice: number) {
+    return this.accountRepository.manager.transaction(async (manager) => {
+      const order = await manager.findOne(InvestmentOrder, {
         where: {
-          stockId: order.stockId,
-          status: StockStatus.ACTIVE,
-          isActive: true,
+          orderId,
+          status: OrderStatus.PENDING,
+          orderType: OrderType.STOP_LIMIT,
         },
+        lock: { mode: 'pessimistic_write' },
       });
 
-      if (!stock) {
-        order.status = OrderStatus.REJECTED;
-        await manager.save(InvestmentOrder, order);
+      if (!order || !this.canTriggerStopOrder(order, currentPrice)) {
         return null;
       }
 
-      try {
-        return order.side === OrderSide.BUY
-          ? await this.fillBuyOrder(
-              manager,
-              account,
-              stock,
-              order,
-              executionPrice,
-            )
-          : await this.fillSellOrder(
-              manager,
-              account,
-              stock,
-              order,
-              executionPrice,
-            );
-      } catch (error) {
-        if (error instanceof BadRequestException) {
-          return null;
-        }
+      order.triggeredAt = order.triggeredAt ?? new Date();
+      order.orderType = OrderType.LIMIT;
+      await manager.save(InvestmentOrder, order);
 
-        throw error;
+      if (!this.canFillLimitOrder(order, currentPrice)) {
+        return this.toOrderPlacementResponse(order, null, null, null);
       }
+
+      return this.executeLockedPendingOrder(manager, order, currentPrice);
     });
   }
 
@@ -848,7 +1581,15 @@ export class TradingService implements OnModuleInit {
   }
 
   private async resolveServerCurrentPrice(stockCode: string) {
-    const currentPrice = await this.kiwoomWebSocketService.getCurrentPrice(stockCode);
+    // Unified simulation price: KRX/NXT are not priced separately in this app.
+    // tradingVenue affects availability and session rules only.
+    const currentPrice =
+      typeof this.kiwoomWebSocketService.getCurrentPriceWithRestFallback ===
+      'function'
+        ? await this.kiwoomWebSocketService.getCurrentPriceWithRestFallback(
+            stockCode,
+          )
+        : await this.kiwoomWebSocketService.getCurrentPrice(stockCode);
 
     if (!this.isValidPrice(currentPrice)) {
       throw new NotFoundException(
@@ -864,6 +1605,23 @@ export class TradingService implements OnModuleInit {
     return this.canFillLimitValues(order.side, currentPrice, limitPrice);
   }
 
+  private canTriggerStopOrder(order: InvestmentOrder, currentPrice: number) {
+    const stopPrice = Number(order.stopPrice);
+    return this.canTriggerStopValues(order.side, currentPrice, stopPrice);
+  }
+
+  private canTriggerStopValues(
+    side: OrderSide,
+    currentPrice: number,
+    stopPrice: number,
+  ) {
+    if (!this.isValidPrice(stopPrice)) return false;
+
+    return side === OrderSide.BUY
+      ? currentPrice >= stopPrice
+      : currentPrice <= stopPrice;
+  }
+
   private canFillLimitValues(
     side: OrderSide,
     currentPrice: number,
@@ -876,6 +1634,352 @@ export class TradingService implements OnModuleInit {
 
   private isValidPrice(value: unknown): value is number {
     return typeof value === 'number' && Number.isFinite(value) && value > 0;
+  }
+
+  private async resolveTodayClosePrice(stock: Stock) {
+    const today = this.formatDate(this.getKstNow());
+    const storedPrice = await this.stockPriceDailyRepository.findOne({
+      where: { stockId: stock.stockId, tradeDate: today },
+    });
+
+    const storedClosePrice = Number(storedPrice?.closePrice);
+    if (this.isValidPrice(storedClosePrice)) {
+      return storedClosePrice;
+    }
+
+    const fetchedPrice = await this.fetchTodayClosePriceFromKiwoom(stock, today);
+    if (fetchedPrice) {
+      return fetchedPrice;
+    }
+
+    throw new NotFoundException(
+      'Today close price is unavailable, so AFTER_HOURS_CLOSE orders cannot be processed.',
+    );
+  }
+
+  private async fetchTodayClosePriceFromKiwoom(stock: Stock, tradeDate: string) {
+    const host =
+      this.configService.get<string>('KIWOOM_API_HOST') ??
+      'https://api.kiwoom.com';
+    const token = await this.kiwoomAuthService.getAccessToken();
+    const baseDt = tradeDate.replace(/-/g, '');
+
+    let data: Record<string, any>;
+    try {
+      const response = await axios.post(
+        `${host}/api/dostk/chart`,
+        {
+          stk_cd: stock.ticker,
+          base_dt: baseDt,
+          upd_stkpc_tp: '1',
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json;charset=UTF-8',
+            authorization: `Bearer ${token}`,
+            'api-id': 'ka10081',
+            'cont-yn': 'N',
+            'next-key': '',
+          },
+          timeout: 10_000,
+        },
+      );
+      data = response.data;
+    } catch (error) {
+      this.logger.warn(
+        `today close price lookup failed stockCode=${stock.ticker}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
+
+    if (Number(data?.return_code ?? 0) !== 0) {
+      return null;
+    }
+
+    const rows = Array.isArray(data?.stk_dt_pole_chart_qry)
+      ? data.stk_dt_pole_chart_qry
+      : [];
+    const todayRow = rows.find((row: Record<string, unknown>) => {
+      const rowDate = String(row?.dt ?? row?.date ?? '').replace(/-/g, '');
+      return rowDate === baseDt;
+    });
+
+    if (!todayRow) {
+      return null;
+    }
+
+    const closePrice = this.toPositiveNumber(
+      todayRow.cur_prc ?? todayRow.close_pric ?? todayRow.close,
+    );
+    if (!this.isValidPrice(closePrice)) {
+      return null;
+    }
+
+    await this.stockPriceDailyRepository.upsert(
+      this.stockPriceDailyRepository.create({
+        stockId: stock.stockId,
+        tradeDate,
+        openPrice: this.toDecimalOrNull(
+          todayRow.open_pric ?? todayRow.open,
+        ),
+        highPrice: this.toDecimalOrNull(
+          todayRow.high_pric ?? todayRow.high,
+        ),
+        lowPrice: this.toDecimalOrNull(todayRow.low_pric ?? todayRow.low),
+        closePrice: this.toDecimal(closePrice),
+        volume: this.toIntegerStringOrNull(
+          todayRow.trde_qty ?? todayRow.volume,
+        ),
+      }),
+      ['stockId', 'tradeDate'],
+    );
+
+    return closePrice;
+  }
+
+  private async checkNxtAvailabilityByKiwoom(ticker: string) {
+    const host =
+      this.configService.get<string>('KIWOOM_API_HOST') ??
+      'https://api.kiwoom.com';
+    const path =
+      this.configService.get<string>('KIWOOM_NXT_ELIGIBILITY_PATH') ??
+      '/api/dostk/stkinfo';
+    const apiId =
+      this.configService.get<string>('KIWOOM_NXT_ELIGIBILITY_API_ID') ??
+      'ka10001';
+    const suffix =
+      this.configService.get<string>('KIWOOM_NXT_ELIGIBILITY_CODE_SUFFIX') ??
+      '_NX';
+    const token = await this.kiwoomAuthService.getAccessToken();
+    const nxtCode = `${ticker}${suffix}`;
+
+    const response = await axios.post(
+      `${host}${path}`,
+      {
+        stk_cd: nxtCode,
+        stex_tp: '2',
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json;charset=UTF-8',
+          authorization: `Bearer ${token}`,
+          'api-id': apiId,
+          'cont-yn': 'N',
+          'next-key': '',
+        },
+        timeout: 10_000,
+      },
+    );
+
+    const data = response.data;
+    const returnCode = Number(data?.return_code ?? 0);
+    if (returnCode !== 0) {
+      return false;
+    }
+
+    const message = String(data?.return_msg ?? '');
+    if (/조회.*없|없습니다|불가|not\s*found|invalid/i.test(message)) {
+      return false;
+    }
+
+    return this.hasMeaningfulKiwoomNxtPayload(data, nxtCode);
+  }
+
+  private hasMeaningfulKiwoomNxtPayload(data: unknown, nxtCode: string) {
+    if (!data || typeof data !== 'object') return false;
+
+    const payload = data as Record<string, unknown>;
+    const stockCode = String(payload.stk_cd ?? '').trim();
+    const stockName = String(payload.stk_nm ?? '').trim();
+    const currentPrice = String(payload.cur_prc ?? '').trim();
+
+    if (stockCode !== nxtCode) return false;
+    if (!stockName) return false;
+    if (!currentPrice) return false;
+
+    return true;
+  }
+
+  private delay(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private async assertRegularMarketSession(
+    market: string | null | undefined,
+    tradingVenue: TradingVenue,
+  ) {
+    if (!(await this.isRegularMarketOpen(market, tradingVenue))) {
+      throw new BadRequestException(
+        'This order type is available only during regular market hours.',
+      );
+    }
+  }
+
+  private async assertAfterHoursCloseSession(
+    market: string | null | undefined,
+    tradingVenue: TradingVenue,
+  ) {
+    if (!(await this.isAfterHoursCloseSession(market, tradingVenue))) {
+      throw new BadRequestException(
+        'AFTER_HOURS_CLOSE orders are available only during the after-hours close session.',
+      );
+    }
+  }
+
+  private assertReservationOrderEntrySession() {
+    if (this.isReservationOrderEntrySession()) {
+      return;
+    }
+
+    throw new BadRequestException(
+      'RESERVATION orders can be placed only from 16:00 to 07:30 KST.',
+    );
+  }
+
+  private isReservationOrderEntrySession() {
+    const seconds = this.getKstSeconds();
+    return (
+      this.isBetweenSeconds(seconds, 16 * 3600, 24 * 3600) ||
+      this.isBetweenSeconds(seconds, 0, 7 * 3600 + 30 * 60)
+    );
+  }
+
+  private async isRegularMarketOpen(
+    market?: string | null,
+    tradingVenue: TradingVenue = TradingVenue.KRX,
+  ) {
+    if (!(await this.isTradingBusinessDay(market))) return false;
+
+    const seconds = this.getKstSeconds();
+    if (tradingVenue === TradingVenue.NXT) {
+      return (
+        this.isBetweenSeconds(seconds, 8 * 3600, 8 * 3600 + 50 * 60) ||
+        this.isBetweenSeconds(
+          seconds,
+          9 * 3600 + 30,
+          15 * 3600 + 20 * 60,
+        ) ||
+        this.isBetweenSeconds(seconds, 15 * 3600 + 40 * 60, 20 * 3600)
+      );
+    }
+
+    return this.isBetweenSeconds(seconds, 9 * 3600, 15 * 3600 + 30 * 60);
+  }
+
+  private async isNxtAfterMarketOrderAcceptanceOnly(
+    market?: string | null,
+    tradingVenue: TradingVenue = TradingVenue.KRX,
+  ) {
+    if (tradingVenue !== TradingVenue.NXT) return false;
+    if (!(await this.isTradingBusinessDay(market))) return false;
+
+    const seconds = this.getKstSeconds();
+    return this.isBetweenSeconds(seconds, 15 * 3600 + 30 * 60, 15 * 3600 + 40 * 60);
+  }
+
+  private async isConditionalLimitCloseSession(market?: string | null) {
+    if (!(await this.isTradingBusinessDay(market))) return false;
+
+    const seconds = this.getKstSeconds();
+    return this.isBetweenSeconds(seconds, 15 * 3600 + 20 * 60, 15 * 3600 + 30 * 60);
+  }
+
+  private async isAfterHoursCloseSession(
+    market?: string | null,
+    tradingVenue: TradingVenue = TradingVenue.KRX,
+  ) {
+    if (!(await this.isTradingBusinessDay(market))) return false;
+
+    const seconds = this.getKstSeconds();
+    if (tradingVenue === TradingVenue.NXT) {
+      return this.isBetweenSeconds(seconds, 15 * 3600 + 30 * 60, 16 * 3600);
+    }
+
+    return this.isBetweenSeconds(seconds, 15 * 3600 + 40 * 60, 16 * 3600);
+  }
+
+  private async isTradingBusinessDay(market?: string | null) {
+    const now = this.getKstNow();
+    const day = now.getDay();
+    if (day === 0 || day === 6) return false;
+
+    const holiday = await this.marketHolidayRepository.findOne({
+      where: {
+        holidayDate: this.formatDate(now),
+        market: this.resolveMarketCode(market),
+      },
+    });
+
+    return !holiday;
+  }
+
+  private getKstSeconds() {
+    const now = this.getKstNow();
+    return now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+  }
+
+  private isBetweenSeconds(value: number, start: number, end: number) {
+    return value >= start && value < end;
+  }
+
+  private getKstNow() {
+    return new Date(
+      new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }),
+    );
+  }
+
+  private resolveMarketCode(market?: string | null) {
+    const normalized = (market?.trim() || 'KRX').toUpperCase();
+    if (['KOSPI', 'KOSDAQ', 'KONEX'].includes(normalized)) {
+      return 'KRX';
+    }
+
+    return normalized;
+  }
+
+  private resolveTradingVenue(tradingVenue?: TradingVenue | null) {
+    return tradingVenue ?? TradingVenue.KRX;
+  }
+
+  private async assertTradingVenueAvailable(
+    stock: Stock,
+    tradingVenue: TradingVenue,
+  ) {
+    if (await this.isTradingVenueAvailable(stock, tradingVenue)) {
+      return;
+    }
+
+    throw new BadRequestException(
+      `This stock is not available on ${tradingVenue}.`,
+    );
+  }
+
+  private async isTradingVenueAvailable(
+    stock: Stock,
+    tradingVenue: TradingVenue,
+  ) {
+    if (tradingVenue === TradingVenue.KRX) {
+      return this.resolveMarketCode(stock.market) === 'KRX';
+    }
+
+    const venue = await this.stockTradingVenueRepository.findOne({
+      where: {
+        stockId: stock.stockId,
+        tradingVenue,
+        isActive: true,
+      },
+    });
+
+    return !!venue;
+  }
+
+  private formatDate(date: Date) {
+    const year = date.getFullYear();
+    const month = `${date.getMonth() + 1}`.padStart(2, '0');
+    const day = `${date.getDate()}`.padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
 
   private async ensureAccount(userId: number) {
@@ -935,13 +2039,46 @@ export class TradingService implements OnModuleInit {
     accountId: number,
     cashBalance: string,
   ) {
-    const holdings = await manager.find(Holding, { where: { accountId } });
-    const stockValue = holdings.reduce(
-      (sum, holding) => sum + holding.quantity * Number(holding.avgBuyPrice),
-      0,
-    );
+    const holdings = await manager.find(Holding, {
+      where: { accountId },
+      relations: { stock: true },
+    });
+
+    let stockValue = 0;
+    for (const holding of holdings) {
+      const valuationPrice = await this.resolveValuationPrice(manager, holding);
+      stockValue += holding.quantity * valuationPrice;
+    }
 
     return this.toDecimal(Number(cashBalance) + stockValue);
+  }
+
+  private async resolveValuationPrice(
+    manager: EntityManager,
+    holding: Holding,
+  ) {
+    const fallbackPrice = Number(holding.avgBuyPrice);
+    const ticker = holding.stock?.ticker;
+
+    if (ticker) {
+      const currentPrice = await this.kiwoomWebSocketService.getCurrentPrice(
+        ticker,
+      );
+      if (this.isValidPrice(currentPrice)) {
+        return currentPrice;
+      }
+    }
+
+    const latestPrice = await manager.findOne(StockPriceDaily, {
+      where: { stockId: holding.stockId },
+      order: { tradeDate: 'DESC' },
+    });
+    const closePrice = Number(latestPrice?.closePrice);
+    if (this.isValidPrice(closePrice)) {
+      return closePrice;
+    }
+
+    return this.isValidPrice(fallbackPrice) ? fallbackPrice : 0;
   }
 
   private async saveCashHistory(
@@ -1000,13 +2137,18 @@ export class TradingService implements OnModuleInit {
       accountId: order.accountId,
       stockId: order.stockId,
       stockCode: order.stockCode,
+      tradingVenue: order.tradingVenue,
       side: order.side,
       orderType: order.orderType,
       status: order.status,
       quantity: order.quantity,
       limitPrice: order.limitPrice,
+      stopPrice: order.stopPrice,
+      executionOrderType: order.executionOrderType,
       reservedAmount: order.reservedAmount,
       executionPrice: order.executionPrice,
+      scheduledAt: order.scheduledAt,
+      triggeredAt: order.triggeredAt,
       createdAt: order.createdAt,
       filledAt: order.filledAt,
       cancelledAt: order.cancelledAt,
@@ -1015,5 +2157,32 @@ export class TradingService implements OnModuleInit {
 
   private toDecimal(value: number) {
     return value.toFixed(2);
+  }
+
+  private toDecimalOrNull(value: unknown) {
+    const numberValue = this.toPositiveNumber(value);
+    return this.isValidPrice(numberValue) ? this.toDecimal(numberValue) : null;
+  }
+
+  private toIntegerStringOrNull(value: unknown) {
+    const numberValue = this.toPositiveNumber(value);
+    if (numberValue === null || !Number.isFinite(numberValue)) {
+      return null;
+    }
+
+    return Math.trunc(numberValue).toString();
+  }
+
+  private toPositiveNumber(value: unknown) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    const numberValue = Number(String(value).replace(/[^0-9.-]/g, ''));
+    if (!Number.isFinite(numberValue)) {
+      return null;
+    }
+
+    return Math.abs(numberValue);
   }
 }
