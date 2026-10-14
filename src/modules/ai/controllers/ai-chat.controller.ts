@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
@@ -53,6 +54,16 @@ import { QuestionAiChatRequestDto } from '../dto/question-ai-chat-request.dto';
     @Query('scope') scope?: 'general' | 'question',
   ) {
     return this.aiChatService.getChatSessions(req.user.userId, scope);
+  }
+
+  @Delete('chat-sessions/:sessionId')
+  @ApiOperation({ summary: 'Delete an owned AI chat session and its messages' })
+  @ApiNotFoundResponse({ description: 'Session not found or not owned by the user' })
+  deleteChatSession(
+    @Req() req,
+    @Param('sessionId', ParseIntPipe) sessionId: number,
+  ) {
+    return this.aiChatService.deleteChatSession(req.user.userId, sessionId);
   }
 
   @Get('chat-sessions/:sessionId/messages')

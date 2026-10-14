@@ -69,6 +69,21 @@ export class AiChatService {
     });
   }
 
+  async deleteChatSession(userId: number, sessionId: number) {
+    return this.sessionRepository.manager.transaction(async (manager) => {
+      const session = await manager.findOne(AiChatSession, {
+        where: { session_id: sessionId, user: { user_id: userId } },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!session) {
+        throw new NotFoundException('AI chat session not found.');
+      }
+      await manager.delete(AiChatMessage, { session: { session_id: sessionId } });
+      await manager.delete(AiChatSession, { session_id: sessionId });
+      return { sessionId, deleted: true };
+    });
+  }
+
   async getChatSessionMessages(userId: number, sessionId: number) {
     const session = await this.sessionRepository.findOne({
       where: {
