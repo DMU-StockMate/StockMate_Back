@@ -310,6 +310,39 @@ describe('TradingService order execution safety', () => {
     ).resolves.toBe(false);
   });
 
+  it.each([
+    '2026-09-21T08:59:59+09:00',
+    '2026-09-21T15:30:00+09:00',
+    '2026-09-26T10:00:00+09:00',
+  ])('explains unavailable regular trading in Korean at %s', async (timestamp) => {
+    const { service } = makeService();
+    (service as any).getKstNow = jest.fn(() => new Date(timestamp));
+
+    await expect(
+      (service as any).assertRegularMarketSession('KOSPI', TradingVenue.KRX),
+    ).rejects.toThrow(
+      '지금은 거래 시간이 아니에요. 다음 거래 시간에 다시 주문해 주세요.',
+    );
+  });
+
+  it('explains unavailable after-hours and reservation orders in Korean', async () => {
+    const { service } = makeService();
+    (service as any).getKstNow = jest.fn(
+      () => new Date('2026-09-21T12:00:00+09:00'),
+    );
+
+    await expect(
+      (service as any).assertAfterHoursCloseSession('KOSPI', TradingVenue.KRX),
+    ).rejects.toThrow(
+      '지금은 시간외 종가 주문을 할 수 없어요. 시간외 종가 거래 시간에 다시 주문해 주세요.',
+    );
+    expect(() =>
+      (service as any).assertReservationOrderEntrySession(),
+    ).toThrow(
+      '예약 주문은 오후 4시부터 다음 날 오전 7시 30분까지 접수할 수 있어요. (한국 시간)',
+    );
+  });
+
   it('uses only today close for after-hours close orders', async () => {
     const { service, stockPriceDailyRepository } = makeService();
     const stock = { stockId: 5, ticker: '005930' } as Stock;
